@@ -1,4 +1,5 @@
-import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil, ast
+import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil, ast, urllib.request
+from datetime import timedelta
 from pathlib import Path
 from functools import wraps
 from flask import Flask, request, redirect, url_for, session, flash, render_template, abort, Response
@@ -48,7 +49,16 @@ for p in (UPLOADS, RUNTIMES, LOGS):
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
-app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
+# Keep browser sessions signed and persistent until logout or expiry (365 days).
+# Render's generated SECRET_KEY must remain stable between deploys.
+app.config.update(
+    MAX_CONTENT_LENGTH=25 * 1024 * 1024,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=365),
+    SESSION_REFRESH_EACH_REQUEST=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("RENDER_EXTERNAL_URL", "").startswith("https://"),
+)
 DB = DATA / "hosting.db"
 ALLOWED = {".py", ".js", ".zip"}
 processes = {}
@@ -98,7 +108,51 @@ def setting(key):
 @app.context_processor
 def inject_globals():
     return {"site_name": setting("site_name"), "support_text": setting("support_text"),
-            "current_user": get_user(), "maintenance": setting("maintenance") == "1"}
+            "current_user": get_user(), "maintenance": setting("maintenance") == "1",
+            "session_days": 365, "keep_alive_enabled": _keep_alive_base_url() is not None,
+            "keep_alive_interval": _keep_alive_interval_minutes()}
+
+def _keep_alive_interval_minutes():
+    try:
+        return max(5, min(14, int(os.getenv("KEEP_ALIVE_INTERVAL_MINUTES", "10"))))
+    except (TypeError, ValueError):
+        return 10
+
+def _keep_alive_base_url():
+    if os.getenv("KEEP_ALIVE_ENABLED", "1").strip().lower() in ("0", "false", "no", "off"):
+        return None
+    base = (os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if not base.startswith(("https://", "http://")):
+        return None
+    return base
+
+@app.get("/health")
+@app.get("/ping")
+def health():
+    return Response("ok\\n", status=200, mimetype="text/plain", headers={"Cache-Control": "no-store"})
+
+def _keep_alive_loop():
+    base = _keep_alive_base_url()
+    if not base:
+        return
+    interval = _keep_alive_interval_minutes() * 60
+    target = base + "/health?source=keepalive"
+    time.sleep(min(60, interval))
+    while True:
+        try:
+            req = urllib.request.Request(target, headers={"User-Agent": "CyberHost-KeepAlive/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                response.read(128)
+        except Exception as exc:
+            try:
+                sys.stderr.write("[keepalive] Ping failed: " + type(exc).__name__ + ": " + str(exc) + "\\n")
+            except Exception:
+                pass
+        time.sleep(interval)
+
+def _start_keep_alive():
+    if _keep_alive_base_url():
+        threading.Thread(target=_keep_alive_loop, name="keep-alive", daemon=True).start()
 
 def get_user():
     uid = session.get("uid")
@@ -161,7 +215,7 @@ def login():
         password = request.form.get("password","")
         with db() as c: user = c.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         if user and check_password_hash(user["password"], password):
-            session.clear(); session["uid"] = user["id"]
+            session.clear(); session["uid"] = user["id"]; session.permanent = True
             return redirect(url_for("admin") if user["is_admin"] else url_for("dashboard"))
         flash("Invalid username or password.", "danger")
     return render_template("auth.html", mode="login")
@@ -602,3 +656,6 @@ def too_large(e): return render_template("error.html", code=413, message="Upload
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
+
+# Start the optional ping loop when Gunicorn imports the app module.
+_start_keep_alive()
