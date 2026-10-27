@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block content %}
+<div class="page-heading"><div><div class="eyebrow">PROCESS OUTPUT</div><h1>{{ bot['name'] }}<span>.</span></h1><p>Live stdout and stderr from the bot process. This page refreshes automatically.</p></div><a class="btn btn-outline" href="{{ url_for('admin') if current_user['is_admin'] else url_for('dashboard') }}">← Back</a></div>
+<section class="panel">
+  <div class="panel-title"><div><div class="eyebrow">LIVE CONSOLE</div><h2>Runtime logs</h2></div><span id="live-state" class="status-badge online">● Connecting</span></div>
+  <pre id="log-output" style="min-height:300px;max-height:65vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#080b12;color:#d8e4f0;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;">Loading logs…</pre>
+  <div class="actions"><button class="tiny-btn" type="button" id="refresh-logs">Refresh now</button><label class="check-label"><input id="auto-scroll" type="checkbox" checked> Auto-scroll to latest</label></div>
+  <p class="muted">Logs show the program's printed output and errors. Secrets printed by the uploaded bot may also appear here, so do not print API tokens or passwords.</p>
+</section>
+<script>
+(() => {
+  const output = document.getElementById('log-output');
+  const state = document.getElementById('live-state');
+  const refresh = async () => {
+    try {
+      const response = await fetch('{{ url_for("bot_logs", bot_id=bot["id"], raw=1) }}', {cache: 'no-store'});
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      output.textContent = await response.text() || 'No output yet. The process may still be starting.';
+      state.textContent = '● Live';
+      state.className = 'status-badge online';
+      if (document.getElementById('auto-scroll').checked) output.scrollTop = output.scrollHeight;
+    } catch (e) {
+      state.textContent = '● Reconnecting';
+      state.className = 'status-badge error';
+    }
+  };
+  document.getElementById('refresh-logs').addEventListener('click', refresh);
+  refresh();
+  setInterval(refresh, 2000);
+})();
+</script>
+{% endblock %}
