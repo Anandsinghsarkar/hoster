@@ -6,10 +6,44 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
 BASE = Path(__file__).resolve().parent
-DATA = Path(os.getenv("DATA_DIR", BASE / "data"))
+
+def _prepare_writable_dir(path: Path) -> Path:
+    """Create a directory and verify that the current process can write to it."""
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / f".write-test-{os.getpid()}"
+    with probe.open("w", encoding="utf-8") as handle:
+        handle.write("ok")
+    probe.unlink(missing_ok=True)
+    return path
+
+def _select_data_dir() -> Path:
+    # Prefer DATA_DIR when configured, but gracefully fall back when a Render
+    # persistent disk is not attached or the path is not writable.
+    configured = os.getenv("DATA_DIR", "").strip()
+    candidates = []
+    if configured:
+        candidates.append(Path(configured))
+    candidates.append(Path("/tmp/cyberhost-data"))
+    # Final local-development fallback. On Render, /tmp is normally writable.
+    candidates.append(BASE / "data")
+    errors = []
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            return _prepare_writable_dir(candidate)
+        except OSError as exc:
+            errors.append(f"{candidate}: {exc}")
+    raise RuntimeError("No writable data directory available. " + " | ".join(errors))
+
+DATA = _select_data_dir()
 UPLOADS = DATA / "uploads"
 RUNTIMES = DATA / "runtimes"
-for p in (DATA, UPLOADS, RUNTIMES): p.mkdir(parents=True, exist_ok=True)
+for p in (UPLOADS, RUNTIMES):
+    p.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
