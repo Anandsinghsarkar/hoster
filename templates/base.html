@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ site_name or 'CYBER HOST' }} — Premium Cloud</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static',filename='style.css') }}"></head><body>
+<div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+<nav class="nav"><a class="brand" href="/"><span class="brand-mark">C</span><span>{{ site_name or 'CYBER HOST' }}<small>BOT CLOUD PLATFORM</small></span></a>
+<div class="nav-actions">{% if current_user %}<a href="/dashboard" class="nav-link">Dashboard</a>{% if current_user['is_admin'] %}<a href="/admin" class="nav-link">Admin</a>{% endif %}<a href="/logout" class="btn btn-outline btn-sm">Sign out</a>{% else %}<a href="/login" class="nav-link">Sign in</a><a href="/register" class="btn btn-primary btn-sm">Get started ↗</a>{% endif %}</div></nav>
+<main class="container">
+{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+{% block content %}{% endblock %}
+<footer><span>© 2026 {{ site_name or 'CYBER HOST' }}</span><span>Built for builders · Secure by design</span></footer>
+</main></body></html>
