@@ -373,7 +373,7 @@ def bot_action(bot_id, action):
         flash("Bot stopped.", "success")
     elif action == "restart":
         stop_process(bot_id)
-        if bot["status"] != "approved" and not u["is_admin"]:
+        if bot["status"] not in ("approved", "stopped", "error", "running") and not u["is_admin"]:
             flash("This bot has not been approved by an admin yet.", "warning")
         else:
             with db() as c: c.execute("UPDATE bots SET status='approved' WHERE id=?", (bot_id,))
