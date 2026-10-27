@@ -1,0 +1,486 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeleHost - Multi-Bot Hoster</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        .console-text { font-family: 'Fira Code', monospace; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        .bot-tab.active { background-color: #1e293b; border-left: 3px solid #3b82f6; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+
+    <!-- Sidebar: Bot List -->
+    <aside class="w-64 bg-slate-900 border-r border-slate-700 flex flex-col hidden md:flex z-10 shadow-xl">
+        <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+            <div class="flex items-center space-x-2">
+                <i class="fa-brands fa-telegram text-blue-500 text-xl"></i>
+                <h1 class="font-bold tracking-wide">TeleHost</h1>
+            </div>
+            <button onclick="createNewBot()" class="text-blue-400 hover:text-white bg-slate-800 hover:bg-blue-600 px-2 py-1 rounded transition-colors" title="Create New Bot">
+                <i class="fa-solid fa-plus"></i>
+            </button>
+        </div>
+        
+        <div class="p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Your Bots</div>
+        
+        <div id="botList" class="flex-1 overflow-y-auto space-y-1 p-2">
+            <!-- Bot list items will be injected here -->
+            <div class="text-center text-sm text-slate-500 mt-10">Loading bots...</div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col h-full overflow-hidden relative">
+        
+        <!-- Mobile Header (Visible only on small screens) -->
+        <div class="md:hidden bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+                <i class="fa-brands fa-telegram text-blue-500"></i>
+                <span class="font-bold">TeleHost</span>
+            </div>
+            <button onclick="document.querySelector('aside').classList.toggle('hidden')" class="text-slate-300">
+                <i class="fa-solid fa-bars text-xl"></i>
+            </button>
+        </div>
+
+        <!-- No Bot Selected Overlay -->
+        <div id="noBotSelected" class="absolute inset-0 bg-slate-900 z-20 flex flex-col items-center justify-center">
+            <i class="fa-solid fa-robot text-6xl text-slate-700 mb-4"></i>
+            <h2 class="text-2xl font-bold text-slate-400 mb-2">No Bot Selected</h2>
+            <p class="text-slate-500 mb-6">Select a bot from the sidebar or create a new one to get started.</p>
+            <button onclick="createNewBot()" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-colors">
+                <i class="fa-solid fa-plus mr-2"></i> Create New Bot
+            </button>
+        </div>
+
+        <!-- Dashboard for Active Bot -->
+        <main id="botDashboard" class="flex-1 flex flex-col lg:flex-row overflow-hidden p-4 gap-4 hidden">
+            
+            <!-- Left Column: Controls & Upload -->
+            <div class="w-full lg:w-1/3 flex flex-col gap-4 overflow-y-auto pr-2 pb-4">
+                
+                <div class="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-md">
+                    <div>
+                        <h2 id="currentBotName" class="text-xl font-bold text-white">Bot Name</h2>
+                        <span id="currentBotId" class="text-xs text-slate-500 font-mono">bot_id</span>
+                    </div>
+                    <div class="flex flex-col items-end">
+                        <div class="flex items-center space-x-2 mb-1">
+                            <div id="statusIndicator" class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+                            <span id="statusText" class="text-xs font-semibold uppercase tracking-wider text-red-400">Offline</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Upload Section -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 shadow-md">
+                    <h3 class="text-sm font-semibold mb-3 flex items-center text-slate-300"><i class="fa-solid fa-cloud-arrow-up mr-2 text-blue-400"></i> Source Code</h3>
+                    
+                    <div id="dropZone" class="border-2 border-dashed border-slate-600 rounded-lg p-6 text-center hover:border-blue-500 hover:bg-slate-750 transition-colors cursor-pointer" onclick="document.getElementById('fileInput').click()">
+                        <i class="fa-regular fa-file-code text-3xl text-slate-400 mb-2"></i>
+                        <p class="text-sm text-slate-300">Click or drag .py / .zip file here</p>
+                        <input type="file" id="fileInput" class="hidden" accept=".py,.zip" onchange="uploadFile(event)">
+                    </div>
+                    
+                    <div id="fileInfo" class="hidden mt-3 bg-slate-900 p-3 rounded-md flex items-center border border-slate-700">
+                        <i id="fileIcon" class="fa-brands fa-python text-yellow-400 mr-3 text-lg"></i>
+                        <span id="fileName" class="text-sm text-slate-300 truncate font-mono">filename</span>
+                    </div>
+                </div>
+
+                <!-- Configuration Section -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 shadow-md">
+                    <h3 class="text-sm font-semibold mb-3 flex items-center text-slate-300"><i class="fa-solid fa-gear mr-2 text-slate-400"></i> Configuration</h3>
+                    
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-400 mb-1">Telegram Bot Token</label>
+                            <input type="password" id="botToken" onchange="saveConfig()" placeholder="1234567890:ABCDEF..." class="w-full bg-slate-900 border border-slate-700 rounded py-2 px-3 text-sm focus:border-blue-500 focus:outline-none text-slate-200">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-400 mb-1">Main Script (entry point)</label>
+                            <input type="text" id="mainScript" onchange="saveConfig()" value="main.py" class="w-full bg-slate-900 border border-slate-700 rounded py-2 px-3 text-sm focus:border-blue-500 focus:outline-none text-slate-200">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ENV Vars -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 p-5 shadow-md flex-1">
+                    <h3 class="text-sm font-semibold mb-3 flex items-center text-slate-300"><i class="fa-solid fa-lock mr-2 text-purple-400"></i> Variables (.env)</h3>
+                    
+                    <div class="flex gap-2 mb-3">
+                        <input type="text" id="envKey" placeholder="KEY" class="w-2/5 bg-slate-900 border border-slate-700 rounded py-1.5 px-2 text-xs focus:border-purple-500 focus:outline-none">
+                        <input type="text" id="envValue" placeholder="VALUE" class="w-2/5 bg-slate-900 border border-slate-700 rounded py-1.5 px-2 text-xs focus:border-purple-500 focus:outline-none">
+                        <button onclick="addEnv()" class="w-1/5 bg-slate-700 hover:bg-slate-600 rounded text-xs transition-colors border border-slate-600">Add</button>
+                    </div>
+                    
+                    <div id="envList" class="space-y-1.5 max-h-40 overflow-y-auto"></div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex gap-3">
+                    <button id="startBtn" onclick="startBot()" class="flex-1 bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl font-semibold transition-colors flex justify-center items-center shadow-lg">
+                        <i class="fa-solid fa-play mr-2"></i> Start
+                    </button>
+                    <button id="stopBtn" onclick="stopBot()" disabled class="flex-1 bg-slate-800 text-slate-500 py-3 rounded-xl font-semibold transition-colors flex justify-center items-center border border-slate-700">
+                        <i class="fa-solid fa-stop mr-2"></i> Stop
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Column: Terminal Console -->
+            <div class="w-full lg:w-2/3 bg-[#0c0c0c] rounded-xl border border-slate-700 shadow-xl flex flex-col overflow-hidden">
+                <div class="bg-slate-800 border-b border-slate-700 px-4 py-2 flex justify-between items-center">
+                    <div class="flex space-x-2">
+                        <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                        <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                        <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    </div>
+                    <span class="text-xs text-slate-400 font-mono">Server Terminal</span>
+                    <button onclick="clearTerminalUI()" class="text-slate-400 hover:text-white text-xs"><i class="fa-solid fa-eraser mr-1"></i> Clear</button>
+                </div>
+                
+                <div id="consoleOut" class="flex-1 p-4 overflow-y-auto console-text text-sm whitespace-pre-wrap text-slate-300">
+                    <span class="text-blue-400">Waiting for connection...</span>
+                </div>
+                
+                <!-- Terminal Input -->
+                <div class="bg-[#0c0c0c] p-3 flex items-center border-t border-slate-800 console-text text-sm">
+                    <span class="text-green-500 mr-3">~$</span>
+                    <input type="text" id="terminalInput" class="flex-1 bg-transparent border-none outline-none text-slate-200 focus:ring-0" placeholder="Run shell commands (pip install) or send to stdin..." autocomplete="off" onkeypress="handleTerminal(event)">
+                </div>
+            </div>
+
+        </main>
+        
+        <!-- Alerts -->
+        <div id="alertBox" class="absolute top-4 right-4 hidden rounded-lg p-3 text-sm font-medium z-50 shadow-lg transform transition-all duration-300 translate-y-[-20px] opacity-0"></div>
+    </div>
+
+    <script>
+        // State
+        let bots = [];
+        let currentBotId = null;
+        let envVars = {};
+        let logInterval = null;
+        let isRunning = false;
+        
+        // --- Core API Wrapper ---
+        async function api(endpoint, method = 'GET', body = null) {
+            try {
+                const options = { method };
+                if (body && !(body instanceof FormData)) {
+                    options.headers = { 'Content-Type': 'application/json' };
+                    options.body = JSON.stringify(body);
+                } else if (body instanceof FormData) {
+                    options.body = body;
+                }
+                const res = await fetch(endpoint, options);
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Server error');
+                }
+                return await res.json();
+            } catch (e) {
+                showAlert(e.message, 'error');
+                console.error(e);
+                throw e;
+            }
+        }
+
+        // --- UI Feedback ---
+        function showAlert(msg, type = 'success') {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.className = `absolute top-4 right-4 rounded-lg p-3 text-sm font-medium z-50 shadow-lg transform transition-all duration-300 flex items-center border ${type === 'error' ? 'bg-red-900/90 text-red-100 border-red-500' : 'bg-green-900/90 text-green-100 border-green-500'}`;
+            alertBox.innerHTML = type === 'error' ? `<i class="fa-solid fa-triangle-exclamation mr-2"></i> ${msg}` : `<i class="fa-solid fa-check mr-2"></i> ${msg}`;
+            
+            alertBox.classList.remove('hidden', 'translate-y-[-20px]', 'opacity-0');
+            setTimeout(() => {
+                alertBox.classList.add('translate-y-[-20px]', 'opacity-0');
+                setTimeout(() => alertBox.classList.add('hidden'), 300);
+            }, 4000);
+        }
+
+        // --- App Initialization ---
+        async function loadBots() {
+            try {
+                bots = await api('/api/bots');
+                renderSidebar();
+            } catch (e) {
+                document.getElementById('botList').innerHTML = `<div class="text-red-400 text-xs text-center mt-4">Backend disconnected.<br/>Please run Node.js server.</div>`;
+            }
+        }
+
+        function renderSidebar() {
+            const list = document.getElementById('botList');
+            list.innerHTML = '';
+            
+            if (bots.length === 0) {
+                list.innerHTML = '<div class="text-center text-xs text-slate-500 mt-4">No bots found.</div>';
+                return;
+            }
+            
+            bots.forEach(bot => {
+                const isActive = bot.id === currentBotId;
+                const statusColor = bot.status === 'online' ? 'bg-green-500' : 'bg-slate-600';
+                
+                const btn = document.createElement('button');
+                btn.className = `bot-tab w-full text-left px-3 py-2 rounded mb-1 flex items-center justify-between text-sm transition-colors ${isActive ? 'active text-white' : 'text-slate-400 hover:bg-slate-800'}`;
+                btn.onclick = () => selectBot(bot.id);
+                btn.innerHTML = `
+                    <span class="truncate w-3/4"><i class="fa-solid fa-robot mr-2 text-slate-500"></i>${bot.name}</span>
+                    <div class="w-2 h-2 rounded-full ${statusColor}"></div>
+                `;
+                list.appendChild(btn);
+            });
+        }
+
+        // --- Bot Management ---
+        async function createNewBot() {
+            const name = prompt("Enter a name for your bot (e.g. My Music Bot):");
+            if (!name) return;
+            const newBot = await api('/api/bots', 'POST', { name });
+            bots.push(newBot);
+            renderSidebar();
+            selectBot(newBot.id);
+            showAlert("New bot workspace created!");
+        }
+
+        function selectBot(id) {
+            currentBotId = id;
+            renderSidebar(); // Update active tab
+            
+            const bot = bots.find(b => b.id === id);
+            if (!bot) return;
+
+            // Update UI Data
+            document.getElementById('noBotSelected').classList.add('hidden');
+            document.getElementById('botDashboard').classList.remove('hidden');
+            
+            document.getElementById('currentBotName').innerText = bot.name;
+            document.getElementById('currentBotId').innerText = bot.id;
+            document.getElementById('botToken').value = bot.token || '';
+            document.getElementById('mainScript').value = bot.mainScript || 'main.py';
+            
+            envVars = bot.envVars || {};
+            renderEnvVars();
+            
+            if(bot.fileName) {
+                showFileInfo(bot.fileName);
+            } else {
+                hideFileInfo();
+            }
+
+            // Sync Status
+            isRunning = bot.status === 'online';
+            updateUIState();
+            
+            // Terminal setup
+            document.getElementById('consoleOut').innerHTML = '<span class="text-slate-500">Fetching logs...</span>';
+            if (logInterval) clearInterval(logInterval);
+            fetchLogs(); // initial fetch
+            logInterval = setInterval(fetchLogs, 1500);
+        }
+
+        async function saveConfig() {
+            if (!currentBotId) return;
+            const token = document.getElementById('botToken').value;
+            const mainScript = document.getElementById('mainScript').value;
+            
+            await api(`/api/bots/${currentBotId}/config`, 'POST', { token, mainScript, envVars });
+            
+            // Update local state silently
+            const bot = bots.find(b => b.id === currentBotId);
+            if(bot) { bot.token = token; bot.mainScript = mainScript; bot.envVars = envVars; }
+        }
+
+        // --- File Upload ---
+        async function uploadFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            if(isRunning) { showAlert("Stop the bot before uploading files.", "error"); return; }
+
+            const fd = new FormData();
+            fd.append('file', file);
+            
+            document.getElementById('consoleOut').innerHTML += `\n<span class="text-blue-400">Uploading ${file.name}...</span>`;
+            
+            try {
+                const res = await api(`/api/bots/${currentBotId}/upload`, 'POST', fd);
+                showFileInfo(res.fileName);
+                showAlert("File uploaded and extracted.");
+                const bot = bots.find(b => b.id === currentBotId);
+                if(bot) bot.fileName = res.fileName;
+            } catch (err) {
+                // Handled in api wrapper
+            }
+        }
+
+        function showFileInfo(name) {
+            document.getElementById('fileInfo').classList.remove('hidden');
+            document.getElementById('fileName').innerText = name;
+            const icon = document.getElementById('fileIcon');
+            icon.className = name.endsWith('.zip') ? 'fa-solid fa-file-zipper text-orange-400 mr-3 text-lg' : 'fa-brands fa-python text-yellow-400 mr-3 text-lg';
+        }
+        function hideFileInfo() { document.getElementById('fileInfo').classList.add('hidden'); }
+
+        // --- ENV Vars ---
+        function addEnv() {
+            const k = document.getElementById('envKey').value.trim().toUpperCase();
+            const v = document.getElementById('envValue').value.trim();
+            if(!k || !v) return showAlert("Provide both key and value.", "error");
+            
+            envVars[k] = v;
+            document.getElementById('envKey').value = '';
+            document.getElementById('envValue').value = '';
+            renderEnvVars();
+            saveConfig();
+        }
+
+        function removeEnv(k) {
+            delete envVars[k];
+            renderEnvVars();
+            saveConfig();
+        }
+
+        function renderEnvVars() {
+            const list = document.getElementById('envList');
+            list.innerHTML = '';
+            if(Object.keys(envVars).length === 0) {
+                list.innerHTML = '<div class="text-xs text-slate-500 py-2">No variables set.</div>';
+                return;
+            }
+            for (const [k, v] of Object.entries(envVars)) {
+                list.innerHTML += `
+                    <div class="flex justify-between items-center bg-slate-900 border border-slate-700 p-2 rounded">
+                        <div class="flex-1 truncate mr-2"><span class="text-purple-400 font-mono text-xs">${k}</span> = <span class="text-slate-400 font-mono text-xs">***</span></div>
+                        <button onclick="removeEnv('${k}')" class="text-red-400 hover:text-red-300 px-2"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                    </div>`;
+            }
+        }
+
+        // --- Bot Controls ---
+        async function startBot() {
+            if (isRunning) return;
+            try {
+                await saveConfig(); // ensure latest config is sent
+                await api(`/api/bots/${currentBotId}/start`, 'POST');
+                isRunning = true;
+                const bot = bots.find(b => b.id === currentBotId);
+                if(bot) bot.status = 'online';
+                renderSidebar();
+                updateUIState();
+                showAlert("Boot sequence started.");
+            } catch(e) {}
+        }
+
+        async function stopBot() {
+            if (!isRunning) return;
+            try {
+                await api(`/api/bots/${currentBotId}/stop`, 'POST');
+                isRunning = false;
+                const bot = bots.find(b => b.id === currentBotId);
+                if(bot) bot.status = 'offline';
+                renderSidebar();
+                updateUIState();
+                showAlert("Bot stopped.");
+            } catch(e) {}
+        }
+
+        function updateUIState() {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const statusInd = document.getElementById('statusIndicator');
+            const statusTxt = document.getElementById('statusText');
+            const overlay = document.getElementById('dropZone');
+
+            if (isRunning) {
+                startBtn.disabled = true; startBtn.classList.replace('bg-green-600', 'bg-slate-800'); startBtn.classList.replace('text-white', 'text-slate-500');
+                stopBtn.disabled = false; stopBtn.classList.replace('bg-slate-800', 'bg-red-600'); stopBtn.classList.replace('text-slate-500', 'text-white');
+                statusInd.className = "w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]";
+                statusTxt.innerText = "Online"; statusTxt.className = "text-xs font-semibold uppercase tracking-wider text-green-400";
+                overlay.classList.add('pointer-events-none', 'opacity-50');
+            } else {
+                startBtn.disabled = false; startBtn.classList.replace('bg-slate-800', 'bg-green-600'); startBtn.classList.replace('text-slate-500', 'text-white');
+                stopBtn.disabled = true; stopBtn.classList.replace('bg-red-600', 'bg-slate-800'); stopBtn.classList.replace('text-white', 'text-slate-500');
+                statusInd.className = "w-2.5 h-2.5 rounded-full bg-red-500";
+                statusTxt.innerText = "Offline"; statusTxt.className = "text-xs font-semibold uppercase tracking-wider text-red-400";
+                overlay.classList.remove('pointer-events-none', 'opacity-50');
+            }
+        }
+
+        // --- Terminal ---
+        let lastLogCount = 0;
+        async function fetchLogs() {
+            if (!currentBotId) return;
+            try {
+                const res = await fetch(`/api/bots/${currentBotId}/logs`);
+                if(!res.ok) return;
+                const data = await res.json();
+                
+                if (data.logs.length !== lastLogCount) {
+                    const out = document.getElementById('consoleOut');
+                    const isScrolledToBottom = out.scrollHeight - out.clientHeight <= out.scrollTop + 10;
+                    
+                    out.innerHTML = data.logs.join('<br>') || '<span class="text-slate-500">No logs yet...</span>';
+                    lastLogCount = data.logs.length;
+                    
+                    if (isScrolledToBottom) out.scrollTop = out.scrollHeight;
+                }
+            } catch(e) {} // fail silently to avoid spam
+        }
+
+        function clearTerminalUI() {
+            document.getElementById('consoleOut').innerHTML = '<span class="text-slate-500">Terminal display cleared (logs still exist on server).</span>';
+            lastLogCount = 0; // force re-render on next fetch if server sends full log
+        }
+
+        async function handleTerminal(e) {
+            if (e.key === 'Enter') {
+                const input = e.target;
+                const cmd = input.value.trim();
+                if (!cmd || !currentBotId) return;
+                
+                input.value = '';
+                
+                try {
+                    // Send to backend to execute
+                    await api(`/api/bots/${currentBotId}/command`, 'POST', { command: cmd });
+                    fetchLogs(); // force immediate fetch
+                } catch(err) {}
+            }
+        }
+
+        // --- Drag & Drop Setup ---
+        const dropZone = document.getElementById('dropZone');
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(e => dropZone.addEventListener(e, prevDef, false));
+        function prevDef(e) { e.preventDefault(); e.stopPropagation(); }
+        ['dragenter', 'dragover'].forEach(e => dropZone.addEventListener(e, () => !isRunning && dropZone.classList.add('border-blue-500', 'bg-slate-750'), false));
+        ['dragleave', 'drop'].forEach(e => dropZone.addEventListener(e, () => dropZone.classList.remove('border-blue-500', 'bg-slate-750'), false));
+        dropZone.addEventListener('drop', (e) => {
+            if(isRunning) return;
+            const input = document.getElementById('fileInput');
+            input.files = e.dataTransfer.files;
+            input.dispatchEvent(new Event('change'));
+        }, false);
+
+        // Boot
+        loadBots();
+    </script>
+</body>
+</html>
