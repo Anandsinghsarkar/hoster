@@ -1,4 +1,4 @@
-import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil
+import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil, ast
 from pathlib import Path
 from functools import wraps
 from flask import Flask, request, redirect, url_for, session, flash, render_template, abort, Response
@@ -223,12 +223,57 @@ def stop_process(bot_id):
             proc.wait(timeout=3)
         _write_log(bot_id, f"[control] Process stopped (exit code {proc.returncode}).")
 
+def _detect_python_packages(entry):
+    """Infer a conservative set of common third-party packages for single-file uploads."""
+    module_to_package = {
+        "requests": "requests", "telegram": "python-telegram-bot",
+        "telebot": "pyTelegramBotAPI", "aiogram": "aiogram",
+        "discord": "discord.py", "aiohttp": "aiohttp",
+        "bs4": "beautifulsoup4", "PIL": "Pillow",
+        "dotenv": "python-dotenv", "pymongo": "pymongo",
+        "motor": "motor", "yt_dlp": "yt-dlp",
+        "cv2": "opencv-python-headless", "numpy": "numpy",
+        "pandas": "pandas", "flask": "Flask",
+        "httpx": "httpx", "openai": "openai",
+        "google": "google-api-python-client", "yaml": "PyYAML",
+        "schedule": "schedule", "apscheduler": "APScheduler",
+        "bs4": "beautifulsoup4", "cryptography": "cryptography",
+    }
+    try:
+        tree = ast.parse(entry.read_text(encoding="utf-8", errors="replace"))
+    except (SyntaxError, OSError, UnicodeError):
+        return []
+    modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module.split(".", 1)[0])
+    stdlib = getattr(sys, "stdlib_module_names", set())
+    return sorted({module_to_package[m] for m in modules if m in module_to_package and m not in stdlib})
+
+def _run_setup_command(command, cwd, env, log, label, timeout=240):
+    log.write(f"[setup] {label}: {' '.join(command)}\n")
+    log.flush()
+    result = subprocess.run(
+        command, cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT,
+        env=env, timeout=timeout, check=False
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"{label} failed with exit code {result.returncode}. Scroll/copy the log for details.")
+    log.write(f"[setup] {label} completed successfully.\n")
+    log.flush()
+
 def run_bot(bot):
     bot_id = bot["id"]
     source = UPLOADS / bot["filename"]
     runtime = RUNTIMES / str(bot_id)
+    # Start from a clean project folder so a previous failed setup cannot leave
+    # stale dependencies or entry files behind.
+    shutil.rmtree(runtime, ignore_errors=True)
     runtime.mkdir(parents=True, exist_ok=True)
     log_path = LOGS / f"{bot_id}.log"
+    proc = None
     try:
         with log_path.open("a", encoding="utf-8", errors="replace") as log:
             log.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}] [system] Launch requested for {bot['name']}\n")
@@ -237,8 +282,10 @@ def run_bot(bot):
             if not source.is_file():
                 raise FileNotFoundError("Uploaded source file is missing. Re-upload the project.")
             if ext == ".zip":
-                # Reject path traversal and symlink entries before extracting.
                 with zipfile.ZipFile(source) as archive:
+                    total_uncompressed = sum(info.file_size for info in archive.infolist())
+                    if total_uncompressed > 100 * 1024 * 1024:
+                        raise ValueError("ZIP expands to over 100 MB; reduce the project size and upload again.")
                     for info in archive.infolist():
                         target = (runtime / info.filename).resolve()
                         if not str(target).startswith(str(runtime.resolve()) + os.sep):
@@ -246,62 +293,111 @@ def run_bot(bot):
                         if (info.external_attr >> 16) & 0o170000 == 0o120000:
                             raise ValueError("Symlinks are not allowed in ZIP uploads.")
                     archive.extractall(runtime)
+                # If the archive contains one project folder, use its contents as
+                # the project root for entry-file and manifest discovery.
+                project_root = runtime
+                top_dirs = [p for p in runtime.iterdir() if p.is_dir()]
+                top_files = [p for p in runtime.iterdir() if p.is_file()]
+                if len(top_dirs) == 1 and not top_files:
+                    project_root = top_dirs[0]
+                py_files = list(project_root.rglob("*.py"))
+                js_files = list(project_root.rglob("*.js"))
+                preferred = ("main.py", "bot.py", "app.py", "run.py", "index.js", "bot.js", "main.js")
                 candidates = sorted(
-                    list(runtime.rglob("*.py")) + list(runtime.rglob("*.js")),
-                    key=lambda p: (p.name.lower() not in ("main.py", "bot.py", "app.py", "index.js", "bot.js"), str(p))
+                    py_files + js_files,
+                    key=lambda p: (p.name.lower() not in preferred, len(p.relative_to(project_root).parts), str(p))
                 )
                 if not candidates:
-                    raise ValueError("ZIP must contain a Python or JavaScript entry file.")
+                    raise ValueError("ZIP must contain a Python or JavaScript entry file (for example bot.py or index.js).")
                 entry = candidates[0]
             else:
+                project_root = runtime
                 entry = runtime / source.name
                 shutil.copy2(source, entry)
 
-            env = {
-                "PATH": os.getenv("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            env = os.environ.copy()
+            env.update({
                 "HOME": str(runtime),
                 "PYTHONUNBUFFERED": "1",
-                "PYTHONPATH": str(runtime / "vendor"),
-            }
-            if ext == ".js" or entry.suffix.lower() == ".js":
-                node = shutil.which("node")
-                if not node:
-                    raise RuntimeError("Node.js runtime is not installed in this Render service. Deploy a Node/Docker runtime to run .js bots.")
-                cmd = [node, str(entry)]
-            else:
-                # If the ZIP contains requirements.txt, install its dependencies into
-                # this bot's own folder, and send installation output to the log.
-                req_files = sorted(runtime.rglob("requirements.txt"))
+                "PYTHONPATH": os.pathsep.join(filter(None, [str(project_root), str(runtime / "vendor"), env.get("PYTHONPATH", "")])),
+                "npm_config_audit": "false",
+                "npm_config_fund": "false",
+            })
+
+            # Python: install requirements.txt automatically. For a lone .py file,
+            # infer a small allowlist of common packages; custom packages should be
+            # declared in requirements.txt inside a ZIP project.
+            if entry.suffix.lower() == ".py":
+                vendor = runtime / "vendor"
+                vendor.mkdir(parents=True, exist_ok=True)
+                req_files = sorted(project_root.rglob("requirements.txt"))
                 if req_files:
                     req = req_files[0]
-                    log.write(f"[system] Installing dependencies from {req.relative_to(runtime)}\n")
-                    log.flush()
-                    install = subprocess.run(
+                    _run_setup_command(
                         [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-                         "--target", str(runtime / "vendor"), "-r", str(req)],
-                        cwd=str(runtime), stdout=log, stderr=subprocess.STDOUT,
-                        env=env, timeout=180, check=False
+                         "--no-warn-script-location", "--target", str(vendor), "-r", str(req)],
+                        project_root, env, log, f"Install Python requirements ({req.relative_to(project_root)})"
                     )
-                    if install.returncode != 0:
-                        raise RuntimeError(f"Dependency installation failed (exit {install.returncode}); see logs.")
+                else:
+                    inferred = _detect_python_packages(entry)
+                    if inferred:
+                        log.write("[setup] Detected common imports: " + ", ".join(inferred) + "\n")
+                        _run_setup_command(
+                            [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                             "--no-warn-script-location", "--target", str(vendor), *inferred],
+                            project_root, env, log, "Install detected Python packages"
+                        )
+                    else:
+                        log.write("[setup] No known third-party imports detected; skipping pip install.\n")
                 cmd = [sys.executable, "-u", str(entry)]
 
-            log.write(f"[system] Starting command: {Path(cmd[0]).name} {Path(cmd[-1]).name}\n")
+            # JavaScript: install package.json dependencies when present. The Docker
+            # runtime includes Node.js/npm; on other runtimes, show a useful error.
+            elif entry.suffix.lower() == ".js":
+                node = shutil.which("node")
+                npm = shutil.which("npm")
+                if not node:
+                    raise RuntimeError("Node.js is unavailable. Deploy this repo with its Dockerfile/runtime to enable .js bots.")
+                package_files = sorted(project_root.rglob("package.json"))
+                package_file = package_files[0] if package_files else None
+                if package_file:
+                    _run_setup_command([npm, "install", "--omit=dev", "--no-audit", "--no-fund"],
+                                       package_file.parent, env, log, "Install npm dependencies")
+                    try:
+                        import json
+                        package_data = json.loads(package_file.read_text(encoding="utf-8"))
+                    except Exception as exc:
+                        raise RuntimeError(f"Could not read package.json: {exc}")
+                    start_script = package_data.get("scripts", {}).get("start")
+                    if start_script:
+                        cmd = [npm, "start"]
+                        project_root = package_file.parent
+                    else:
+                        main_name = package_data.get("main", "index.js")
+                        candidate = package_file.parent / main_name
+                        cmd = [node, str(candidate if candidate.is_file() else entry)]
+                        project_root = package_file.parent
+                else:
+                    cmd = [node, str(entry)]
+            else:
+                raise ValueError("Unsupported entry file. Upload a .py, .js, or ZIP project.")
+
+            log.write(f"[system] Starting command: {' '.join(cmd)}\n")
             log.flush()
             proc = subprocess.Popen(
-                cmd, cwd=str(runtime), stdout=log, stderr=subprocess.STDOUT,
+                cmd, cwd=str(project_root), stdout=log, stderr=subprocess.STDOUT,
                 env=env, start_new_session=True
             )
             time.sleep(1.0)
             if proc.poll() is not None:
-                raise RuntimeError(f"Process exited during startup (exit code {proc.returncode}); see logs.")
+                raise RuntimeError(f"Process exited during startup (exit code {proc.returncode}); see logs below.")
             with process_lock:
                 processes[bot_id] = proc
             with db() as c:
                 c.execute("UPDATE bots SET status='running',last_error='' WHERE id=?", (bot_id,))
-            log.write("[system] Process is running; stdout/stderr are being captured below.\n")
+            log.write("[system] Process is running; stdout/stderr and exceptions are captured below.\n")
             log.flush()
-        # A separate monitor updates status if the bot exits later.
+
         def monitor():
             exit_code = proc.wait()
             with process_lock:
@@ -310,14 +406,19 @@ def run_bot(bot):
             with db() as c:
                 row = c.execute("SELECT status FROM bots WHERE id=?", (bot_id,)).fetchone()
                 if row and row["status"] == "running":
+                    error = "" if exit_code == 0 else f"Process exited with code {exit_code}. Open Live logs and copy the traceback."
                     c.execute("UPDATE bots SET status=?,last_error=? WHERE id=?",
-                              ("stopped" if exit_code == 0 else "error",
-                               "" if exit_code == 0 else f"Process exited with code {exit_code}", bot_id))
+                              ("stopped" if exit_code == 0 else "error", error, bot_id))
             _write_log(bot_id, f"[system] Process exited with code {exit_code}.")
         threading.Thread(target=monitor, daemon=True).start()
     except Exception as exc:
         message = f"{type(exc).__name__}: {exc}"
         _write_log(bot_id, f"[error] {message}")
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
         with db() as c:
             c.execute("UPDATE bots SET status='error',last_error=? WHERE id=?", (message[:500], bot_id))
 
