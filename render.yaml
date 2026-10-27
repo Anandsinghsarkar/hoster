@@ -1,9 +1,8 @@
 services:
   - type: web
     name: cyberhost-premium
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 120
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: DATA_DIR
         value: /tmp/cyberhost-data
