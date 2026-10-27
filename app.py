@@ -129,7 +129,7 @@ def _keep_alive_base_url():
 @app.get("/health")
 @app.get("/ping")
 def health():
-    return Response("ok\\n", status=200, mimetype="text/plain", headers={"Cache-Control": "no-store"})
+    return Response("ok\n", status=200, mimetype="text/plain", headers={"Cache-Control": "no-store"})
 
 def _keep_alive_loop():
     base = _keep_alive_base_url()
@@ -145,7 +145,7 @@ def _keep_alive_loop():
                 response.read(128)
         except Exception as exc:
             try:
-                sys.stderr.write("[keepalive] Ping failed: " + type(exc).__name__ + ": " + str(exc) + "\\n")
+                sys.stderr.write("[keepalive] Ping failed: " + type(exc).__name__ + ": " + str(exc) + "\n")
             except Exception:
                 pass
         time.sleep(interval)
