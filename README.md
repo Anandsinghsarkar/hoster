@@ -6,8 +6,13 @@ A premium-styled Flask starter for managing user-uploaded Python, JavaScript and
 1. Upload this project to a new GitHub repository, or use **New > Web Service** to connect the repository.
 2. Render uses the included `Dockerfile`, which provides Python and Node.js/npm. This configuration does not require a paid persistent disk. If you already have an existing Render service configured with the Python runtime and Render does not allow changing its runtime, create a new Web Service from this repo and select the Docker runtime.
 3. Set `ADMIN_PASSWORD` to a strong password in Render environment variables before launch. `ADMIN_USERNAME` defaults to `admin`.
-4. Deploy. Open `/login` and sign in with the admin credentials.
+4. Deploy. The app uses a 365-day persistent login cookie and configures a best-effort health ping every 10 minutes using Render's RENDER_EXTERNAL_URL. Open `/login` and sign in with the admin credentials.
 5. Change the UPI ID, QR URL, support text and site name in Admin.
+
+## Login persistence and health ping
+- Successful login creates a permanent Flask session cookie that lasts up to 365 days and refreshes as the user visits the site. It ends when the user signs out, clears browser cookies, or the cookie expires. Keep Render's generated SECRET_KEY stable between deploys; changing it invalidates existing sessions.
+- The /health and /ping endpoints return a lightweight ok response for health checks. When KEEP_ALIVE_ENABLED=true and RENDER_EXTERNAL_URL is available, the app makes a best-effort request to its own health endpoint every 10 minutes. You can change the interval with KEEP_ALIVE_INTERVAL_MINUTES (supported range 5–14) or set KEEP_ALIVE_URL to the public base URL.
+- This cannot guarantee 24/7 uptime. Render can restart services or suspend free instances independently of app code, and self-pings may not prevent sleep in every configuration. Render's official free-instance documentation describes the 15-minute idle spin-down and ephemeral filesystem limitations: https://render.com/docs/free. Do not rely on this as a production uptime guarantee.
 
 ## Important production notes
 - This diskless setup stores the SQLite database, uploads, runtime files, and current log files under `/tmp/cyberhost-data`. It avoids the `/var/data` permission error, but `/tmp` is temporary storage: accounts, uploads, logs, and settings may be lost when the service restarts, redeploys, or the instance is replaced. Running bot processes also stop when the service instance is replaced. Reliable persistence requires an external database and durable file storage; reliable long-running bot hosting should use a separate worker service.
