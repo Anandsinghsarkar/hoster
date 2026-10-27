@@ -653,9 +653,9 @@ def not_found(e): return render_template("error.html", code=404, message="Page n
 @app.errorhandler(413)
 def too_large(e): return render_template("error.html", code=413, message="Upload too large. Maximum upload size is 25 MB."), 413
 
+# Start the optional ping loop in both Gunicorn and local development.
+_start_keep_alive()
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
-
-# Start the optional ping loop when Gunicorn imports the app module.
-_start_keep_alive()
