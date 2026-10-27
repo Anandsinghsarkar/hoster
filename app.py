@@ -1,7 +1,7 @@
 import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil
 from pathlib import Path
 from functools import wraps
-from flask import Flask, request, redirect, url_for, session, flash, render_template, send_from_directory, abort
+from flask import Flask, request, redirect, url_for, session, flash, render_template, abort, Response
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -42,7 +42,8 @@ def _select_data_dir() -> Path:
 DATA = _select_data_dir()
 UPLOADS = DATA / "uploads"
 RUNTIMES = DATA / "runtimes"
-for p in (UPLOADS, RUNTIMES):
+LOGS = DATA / "logs"
+for p in (UPLOADS, RUNTIMES, LOGS):
     p.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
@@ -203,50 +204,154 @@ def upload():
     flash("Upload received. It is pending admin review before it can run.", "success")
     return redirect(url_for("dashboard"))
 
+def _write_log(bot_id, message):
+    LOGS.mkdir(parents=True, exist_ok=True)
+    with (LOGS / f"{bot_id}.log").open("a", encoding="utf-8", errors="replace") as handle:
+        handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}] {message}\n")
+        handle.flush()
+
 def stop_process(bot_id):
     with process_lock:
         proc = processes.pop(bot_id, None)
     if proc and proc.poll() is None:
+        _write_log(bot_id, "[control] Stop requested.")
         proc.terminate()
-        try: proc.wait(timeout=4)
-        except subprocess.TimeoutExpired: proc.kill()
+        try:
+            proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=3)
+        _write_log(bot_id, f"[control] Process stopped (exit code {proc.returncode}).")
 
 def run_bot(bot):
+    bot_id = bot["id"]
     source = UPLOADS / bot["filename"]
-    runtime = RUNTIMES / str(bot["id"])
+    runtime = RUNTIMES / str(bot_id)
     runtime.mkdir(parents=True, exist_ok=True)
-    ext = source.suffix.lower()
+    log_path = LOGS / f"{bot_id}.log"
     try:
-        if ext == ".zip":
-            # Reject path traversal and symlink entries before extracting.
-            with zipfile.ZipFile(source) as z:
-                for info in z.infolist():
-                    target = (runtime / info.filename).resolve()
-                    if not str(target).startswith(str(runtime.resolve()) + os.sep):
-                        raise ValueError("Unsafe path in ZIP archive.")
-                    if info.external_attr >> 16 & 0o170000 == 0o120000:
-                        raise ValueError("Symlinks are not allowed in ZIP uploads.")
-                z.extractall(runtime)
-            candidates = list(runtime.rglob("*.py")) + list(runtime.rglob("*.js"))
-            if not candidates: raise ValueError("ZIP must contain a Python or JavaScript entry file.")
-            entry = candidates[0]
-        else:
-            entry = runtime / source.name
-            shutil.copy2(source, entry)
-        if ext == ".js" or entry.suffix.lower() == ".js":
-            cmd = ["node", str(entry)]
-        else:
-            cmd = [sys.executable, str(entry)]
-        # No shell=True. Production deployments should isolate uploaded code in containers.
-        proc = subprocess.Popen(cmd, cwd=str(runtime), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                env={"PATH": os.getenv("PATH",""), "HOME": str(runtime), "PYTHONUNBUFFERED":"1"})
-        time.sleep(0.6)
-        if proc.poll() is not None:
-            raise RuntimeError("Process exited immediately. Check runtime dependencies and entry file.")
-        with process_lock: processes[bot["id"]] = proc
-        with db() as c: c.execute("UPDATE bots SET status='running',last_error='' WHERE id=?", (bot["id"],))
-    except Exception as e:
-        with db() as c: c.execute("UPDATE bots SET status='error',last_error=? WHERE id=?", (str(e)[:500],bot["id"]))
+        with log_path.open("a", encoding="utf-8", errors="replace") as log:
+            log.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}] [system] Launch requested for {bot['name']}\n")
+            log.flush()
+            ext = source.suffix.lower()
+            if not source.is_file():
+                raise FileNotFoundError("Uploaded source file is missing. Re-upload the project.")
+            if ext == ".zip":
+                # Reject path traversal and symlink entries before extracting.
+                with zipfile.ZipFile(source) as archive:
+                    for info in archive.infolist():
+                        target = (runtime / info.filename).resolve()
+                        if not str(target).startswith(str(runtime.resolve()) + os.sep):
+                            raise ValueError("Unsafe path in ZIP archive.")
+                        if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                            raise ValueError("Symlinks are not allowed in ZIP uploads.")
+                    archive.extractall(runtime)
+                candidates = sorted(
+                    list(runtime.rglob("*.py")) + list(runtime.rglob("*.js")),
+                    key=lambda p: (p.name.lower() not in ("main.py", "bot.py", "app.py", "index.js", "bot.js"), str(p))
+                )
+                if not candidates:
+                    raise ValueError("ZIP must contain a Python or JavaScript entry file.")
+                entry = candidates[0]
+            else:
+                entry = runtime / source.name
+                shutil.copy2(source, entry)
+
+            env = {
+                "PATH": os.getenv("PATH", "/usr/local/bin:/usr/bin:/bin"),
+                "HOME": str(runtime),
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONPATH": str(runtime / "vendor"),
+            }
+            if ext == ".js" or entry.suffix.lower() == ".js":
+                node = shutil.which("node")
+                if not node:
+                    raise RuntimeError("Node.js runtime is not installed in this Render service. Deploy a Node/Docker runtime to run .js bots.")
+                cmd = [node, str(entry)]
+            else:
+                # If the ZIP contains requirements.txt, install its dependencies into
+                # this bot's own folder, and send installation output to the log.
+                req_files = sorted(runtime.rglob("requirements.txt"))
+                if req_files:
+                    req = req_files[0]
+                    log.write(f"[system] Installing dependencies from {req.relative_to(runtime)}\n")
+                    log.flush()
+                    install = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                         "--target", str(runtime / "vendor"), "-r", str(req)],
+                        cwd=str(runtime), stdout=log, stderr=subprocess.STDOUT,
+                        env=env, timeout=180, check=False
+                    )
+                    if install.returncode != 0:
+                        raise RuntimeError(f"Dependency installation failed (exit {install.returncode}); see logs.")
+                cmd = [sys.executable, "-u", str(entry)]
+
+            log.write(f"[system] Starting command: {Path(cmd[0]).name} {Path(cmd[-1]).name}\n")
+            log.flush()
+            proc = subprocess.Popen(
+                cmd, cwd=str(runtime), stdout=log, stderr=subprocess.STDOUT,
+                env=env, start_new_session=True
+            )
+            time.sleep(1.0)
+            if proc.poll() is not None:
+                raise RuntimeError(f"Process exited during startup (exit code {proc.returncode}); see logs.")
+            with process_lock:
+                processes[bot_id] = proc
+            with db() as c:
+                c.execute("UPDATE bots SET status='running',last_error='' WHERE id=?", (bot_id,))
+            log.write("[system] Process is running; stdout/stderr are being captured below.\n")
+            log.flush()
+        # A separate monitor updates status if the bot exits later.
+        def monitor():
+            exit_code = proc.wait()
+            with process_lock:
+                if processes.get(bot_id) is proc:
+                    processes.pop(bot_id, None)
+            with db() as c:
+                row = c.execute("SELECT status FROM bots WHERE id=?", (bot_id,)).fetchone()
+                if row and row["status"] == "running":
+                    c.execute("UPDATE bots SET status=?,last_error=? WHERE id=?",
+                              ("stopped" if exit_code == 0 else "error",
+                               "" if exit_code == 0 else f"Process exited with code {exit_code}", bot_id))
+            _write_log(bot_id, f"[system] Process exited with code {exit_code}.")
+        threading.Thread(target=monitor, daemon=True).start()
+    except Exception as exc:
+        message = f"{type(exc).__name__}: {exc}"
+        _write_log(bot_id, f"[error] {message}")
+        with db() as c:
+            c.execute("UPDATE bots SET status='error',last_error=? WHERE id=?", (message[:500], bot_id))
+
+@app.get("/bot/<int:bot_id>/logs")
+@login_required
+def bot_logs(bot_id):
+    u = get_user()
+    with db() as c:
+        bot = c.execute("SELECT * FROM bots WHERE id=?", (bot_id,)).fetchone()
+    if not bot or (bot["user_id"] != u["id"] and not u["is_admin"]):
+        abort(404)
+    if request.args.get("raw") == "1":
+        path = LOGS / f"{bot_id}.log"
+        try:
+            with path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - 64 * 1024))
+                content = handle.read().decode("utf-8", errors="replace")
+        except FileNotFoundError:
+            content = "No logs yet. Approve or restart this bot to launch it."
+        with process_lock:
+            proc = processes.get(bot_id)
+            alive = bool(proc and proc.poll() is None)
+        if not alive:
+            with db() as c:
+                current = c.execute("SELECT status,last_error FROM bots WHERE id=?", (bot_id,)).fetchone()
+            if current and current["status"] == "running":
+                with db() as c:
+                    c.execute("UPDATE bots SET status='error',last_error=? WHERE id=?",
+                              ("Process is no longer running; check logs.", bot_id))
+        return Response(content, mimetype="text/plain; charset=utf-8",
+                        headers={"Cache-Control": "no-store"})
+    return render_template("logs.html", bot=bot)
 
 @app.post("/bot/<int:bot_id>/<action>")
 @login_required
