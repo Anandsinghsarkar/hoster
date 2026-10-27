@@ -3,7 +3,8 @@
 <section class="panel">
   <div class="panel-title"><div><div class="eyebrow">LIVE CONSOLE</div><h2>Runtime logs</h2></div><span id="live-state" class="status-badge online">● Connecting</span></div>
   <pre id="log-output" style="min-height:300px;max-height:65vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#080b12;color:#d8e4f0;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px;font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;">Loading logs…</pre>
-  <div class="actions"><button class="tiny-btn" type="button" id="refresh-logs">Refresh now</button><label class="check-label"><input id="auto-scroll" type="checkbox" checked> Auto-scroll to latest</label></div>
+  {% if bot['last_error'] %}<div class="error-text" id="last-error" style="white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border-radius:10px;background:rgba(255,70,70,.08);margin:12px 0;">{{ bot['last_error'] }}</div>{% endif %}
+  <div class="actions"><button class="tiny-btn" type="button" id="refresh-logs">Refresh now</button><button class="tiny-btn" type="button" id="copy-logs">Copy logs</button>{% if bot['last_error'] %}<button class="tiny-btn" type="button" id="copy-error">Copy error</button>{% endif %}<label class="check-label"><input id="auto-scroll" type="checkbox" checked> Auto-scroll to latest</label></div><span id="copy-state" class="muted" aria-live="polite"></span>
   <p class="muted">Logs show the program's printed output and errors. Secrets printed by the uploaded bot may also appear here, so do not print API tokens or passwords.</p>
 </section>
 <script>
@@ -24,6 +25,22 @@
     }
   };
   document.getElementById('refresh-logs').addEventListener('click', refresh);
+  const copyText = async (value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      document.getElementById('copy-state').textContent = 'Copied to clipboard.';
+    } catch (_) {
+      const box = document.createElement('textarea');
+      box.value = value;
+      box.style.position = 'fixed'; box.style.opacity = '0';
+      document.body.appendChild(box); box.select();
+      const ok = document.execCommand('copy'); box.remove();
+      document.getElementById('copy-state').textContent = ok ? 'Copied to clipboard.' : 'Copy failed; select the text and copy manually.';
+    }
+  };
+  document.getElementById('copy-logs').addEventListener('click', () => copyText(output.textContent));
+  const copyError = document.getElementById('copy-error');
+  if (copyError) copyError.addEventListener('click', () => copyText(document.getElementById('last-error').textContent));
   refresh();
   setInterval(refresh, 2000);
 })();
