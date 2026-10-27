@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: cyberhost-premium
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 120
+    disk:
+      name: cyberhost-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
