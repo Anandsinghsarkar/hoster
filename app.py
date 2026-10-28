@@ -1,4 +1,4 @@
-import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil, ast, urllib.request
+import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil, ast, urllib.request, hashlib, json
 from datetime import timedelta
 from pathlib import Path
 from functools import wraps
@@ -86,6 +86,10 @@ def init_db():
           id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, plan_id INTEGER NOT NULL, utr TEXT NOT NULL,
           status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS api_tokens(
+          id INTEGER PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL,
+          token_prefix TEXT NOT NULL, scopes TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          expires_at TEXT, last_used_at TEXT, revoked_at TEXT);
         """)
         if not c.execute("SELECT id FROM users WHERE is_admin=1").fetchone():
             admin_user = os.getenv("ADMIN_USERNAME", "admin")
@@ -153,6 +157,177 @@ def _keep_alive_loop():
 def _start_keep_alive():
     if _keep_alive_base_url():
         threading.Thread(target=_keep_alive_loop, name="keep-alive", daemon=True).start()
+
+API_SCOPES = {
+    "site:read": "Read basic website settings",
+    "users:read": "List registered users",
+    "bots:read": "List bots and read statuses",
+    "bots:control": "Approve, reject, stop or restart bots",
+    "bots:delete": "Delete bots and their stored files",
+    "payments:read": "Read payment requests and statuses",
+}
+
+def api_json_error(message, status):
+    return Response(json.dumps({"error": message}, ensure_ascii=False), status=status,
+                    mimetype="application/json", headers={"Cache-Control": "no-store"})
+
+def _api_token_from_request():
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    raw = auth[7:].strip()
+    if not raw or len(raw) > 300:
+        return None
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    with db() as c:
+        row = c.execute("SELECT * FROM api_tokens WHERE token_hash=? AND revoked_at IS NULL", (digest,)).fetchone()
+        if not row:
+            return None
+        if row["expires_at"]:
+            try:
+                from datetime import datetime, timezone
+                expiry = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                if expiry <= datetime.now(timezone.utc):
+                    return None
+            except (ValueError, TypeError):
+                return None
+        c.execute("UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?", (row["id"],))
+        return {"id": row["id"], "name": row["name"], "scopes": set(filter(None, row["scopes"].split(",")))}
+
+def api_auth(fn):
+    @wraps(fn)
+    def wrap(*args, **kwargs):
+        token = _api_token_from_request()
+        if not token:
+            return api_json_error("Missing, invalid, expired, or revoked bearer token.", 401)
+        request.api_token = token
+        return fn(*args, **kwargs)
+    return wrap
+
+def api_scope_required(scope):
+    def decorator(fn):
+        @wraps(fn)
+        @api_auth
+        def wrap(*args, **kwargs):
+            if scope not in request.api_token["scopes"]:
+                return api_json_error("Token lacks required scope: " + scope, 403)
+            return fn(*args, **kwargs)
+        return wrap
+    return decorator
+
+def api_bot_dict(bot):
+    return {key: bot[key] for key in ("id", "user_id", "name", "filename", "status", "created_at", "last_error")}
+
+@app.get("/api/v1")
+def api_index():
+    return Response(json.dumps({
+        "name": "CYBER HOST API", "version": "v1",
+        "authentication": "Authorization: Bearer <token>",
+        "endpoints": {
+            "GET /api/v1/me": "Token identity and granted scopes",
+            "GET /api/v1/settings": "site:read",
+            "GET /api/v1/users": "users:read",
+            "GET /api/v1/bots": "bots:read",
+            "GET /api/v1/bots/<id>": "bots:read",
+            "POST /api/v1/bots/<id>/actions/approve|reject|stop|restart": "bots:control",
+            "DELETE /api/v1/bots/<id>": "bots:delete",
+            "GET /api/v1/payments": "payments:read"
+        },
+        "note": "Create and scope tokens in the Admin console. Never expose tokens in browser code."
+    }, ensure_ascii=False), mimetype="application/json", headers={"Cache-Control": "no-store"})
+
+@app.get("/api/v1/me")
+@api_auth
+def api_me():
+    return Response(json.dumps({"token_id": request.api_token["id"], "name": request.api_token["name"],
+                                "scopes": sorted(request.api_token["scopes"])}, ensure_ascii=False),
+                    mimetype="application/json", headers={"Cache-Control": "no-store"})
+
+@app.get("/api/v1/settings")
+@api_scope_required("site:read")
+def api_settings():
+    with db() as c:
+        values = {r["key"]: r["value"] for r in c.execute(
+            "SELECT key,value FROM settings WHERE key IN ('site_name','support_text','maintenance')").fetchall()}
+    return Response(json.dumps({"settings": values}, ensure_ascii=False), mimetype="application/json")
+
+@app.get("/api/v1/users")
+@api_scope_required("users:read")
+def api_users():
+    with db() as c:
+        rows = c.execute("SELECT id,username,is_admin,credits,created_at FROM users ORDER BY id DESC LIMIT 500").fetchall()
+    return Response(json.dumps({"users": [dict(r) for r in rows]}, ensure_ascii=False), mimetype="application/json")
+
+@app.get("/api/v1/bots")
+@api_scope_required("bots:read")
+def api_bots():
+    with db() as c:
+        rows = c.execute("SELECT * FROM bots WHERE status!='deleted' ORDER BY id DESC LIMIT 500").fetchall()
+    return Response(json.dumps({"bots": [api_bot_dict(r) for r in rows]}, ensure_ascii=False), mimetype="application/json")
+
+@app.get("/api/v1/bots/<int:bot_id>")
+@api_scope_required("bots:read")
+def api_bot_detail(bot_id):
+    with db() as c:
+        row = c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'", (bot_id,)).fetchone()
+    if not row:
+        return api_json_error("Bot not found.", 404)
+    return Response(json.dumps({"bot": api_bot_dict(row)}, ensure_ascii=False), mimetype="application/json")
+
+@app.post("/api/v1/bots/<int:bot_id>/actions/<action>")
+@api_scope_required("bots:control")
+def api_bot_control(bot_id, action):
+    if action not in ("approve", "reject", "stop", "restart"):
+        return api_json_error("Action must be approve, reject, stop, or restart.", 400)
+    with db() as c:
+        bot = c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'", (bot_id,)).fetchone()
+    if not bot:
+        return api_json_error("Bot not found.", 404)
+    if action == "approve":
+        with db() as c: c.execute("UPDATE bots SET status='approved',last_error='' WHERE id=?", (bot_id,))
+        with db() as c: fresh = c.execute("SELECT * FROM bots WHERE id=?", (bot_id,)).fetchone()
+        threading.Thread(target=run_bot, args=(fresh,), daemon=True).start()
+    elif action == "reject":
+        stop_process(bot_id)
+        with db() as c: c.execute("UPDATE bots SET status='rejected' WHERE id=?", (bot_id,))
+    elif action == "stop":
+        stop_process(bot_id)
+        with db() as c: c.execute("UPDATE bots SET status='stopped' WHERE id=?", (bot_id,))
+    else:
+        stop_process(bot_id)
+        with db() as c: c.execute("UPDATE bots SET status='approved' WHERE id=?", (bot_id,))
+        with db() as c: fresh = c.execute("SELECT * FROM bots WHERE id=?", (bot_id,)).fetchone()
+        threading.Thread(target=run_bot, args=(fresh,), daemon=True).start()
+    with db() as c:
+        fresh = c.execute("SELECT * FROM bots WHERE id=?", (bot_id,)).fetchone()
+    return Response(json.dumps({"ok": True, "action": action, "bot": api_bot_dict(fresh)}, ensure_ascii=False),
+                    mimetype="application/json")
+
+@app.delete("/api/v1/bots/<int:bot_id>")
+@api_scope_required("bots:delete")
+def api_bot_delete(bot_id):
+    with db() as c:
+        bot = c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'", (bot_id,)).fetchone()
+    if not bot:
+        return api_json_error("Bot not found.", 404)
+    stop_process(bot_id)
+    with db() as c: c.execute("UPDATE bots SET status='deleted' WHERE id=?", (bot_id,))
+    shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
+    try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
+    except OSError: pass
+    return Response(json.dumps({"ok": True, "deleted_bot_id": bot_id}), mimetype="application/json")
+
+@app.get("/api/v1/payments")
+@api_scope_required("payments:read")
+def api_payments():
+    with db() as c:
+        rows = c.execute("""SELECT payments.id,payments.user_id,users.username,payments.plan_id,
+            plans.name plan_name,payments.utr,payments.status,payments.created_at
+            FROM payments JOIN users ON users.id=payments.user_id
+            JOIN plans ON plans.id=payments.plan_id ORDER BY payments.id DESC LIMIT 500""").fetchall()
+    return Response(json.dumps({"payments": [dict(r) for r in rows]}, ensure_ascii=False), mimetype="application/json")
 
 def get_user():
     uid = session.get("uid")
@@ -547,7 +722,43 @@ def admin():
         payments = c.execute("SELECT payments.*,users.username,plans.name plan_name FROM payments JOIN users ON users.id=payments.user_id JOIN plans ON plans.id=payments.plan_id ORDER BY payments.id DESC").fetchall()
         plans = c.execute("SELECT * FROM plans ORDER BY price").fetchall()
         settings = {r["key"]:r["value"] for r in c.execute("SELECT * FROM settings").fetchall()}
-    return render_template("admin.html", users=users, bots=bots, payments=payments, plans=plans, settings=settings)
+        api_tokens = c.execute("SELECT id,name,token_prefix,scopes,created_at,expires_at,last_used_at,revoked_at FROM api_tokens ORDER BY id DESC").fetchall()
+    new_api_token = session.pop("new_api_token", None)
+    return render_template("admin.html", users=users, bots=bots, payments=payments, plans=plans, settings=settings,
+                           api_tokens=api_tokens, api_scopes=API_SCOPES, new_api_token=new_api_token)
+
+@app.post("/admin/api-tokens")
+@admin_required
+def create_api_token():
+    name = request.form.get("name", "").strip()[:80]
+    chosen = sorted(set(request.form.getlist("scopes")) & set(API_SCOPES))
+    try:
+        days = int(request.form.get("days", "90"))
+    except ValueError:
+        days = 90
+    days = max(1, min(365, days))
+    if not name or not chosen:
+        flash("Give the token a name and choose at least one permission.", "danger")
+        return redirect(url_for("admin") + "#api-access")
+    raw = "ch_live_" + secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    from datetime import datetime, timezone, timedelta as dt_timedelta
+    expiry = (datetime.now(timezone.utc) + dt_timedelta(days=days)).isoformat(timespec="seconds")
+    with db() as c:
+        cur = c.execute("INSERT INTO api_tokens(name,token_hash,token_prefix,scopes,expires_at) VALUES(?,?,?,?,?)",
+                        (name, digest, raw[:15] + "...", ",".join(chosen), expiry))
+        token_id = cur.lastrowid
+    session["new_api_token"] = {"id": token_id, "name": name, "token": raw, "scopes": chosen, "expires_at": expiry}
+    flash("API token created. Copy it now; the full token will not be shown again.", "success")
+    return redirect(url_for("admin") + "#api-access")
+
+@app.post("/admin/api-tokens/<int:token_id>/revoke")
+@admin_required
+def revoke_api_token(token_id):
+    with db() as c:
+        c.execute("UPDATE api_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE id=? AND revoked_at IS NULL", (token_id,))
+    flash("API token revoked. Requests using it will stop working.", "success")
+    return redirect(url_for("admin") + "#api-access")
 
 @app.post("/admin/bot/<int:bot_id>/<action>")
 @admin_required
