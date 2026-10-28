@@ -1,31 +1,74 @@
 {% extends "base.html" %}{% block content %}
-<div class="page-heading"><div><div class="eyebrow">BOT WORKSPACE / TERMINAL</div><h1>Web terminal<span>.</span></h1><p>{{ bot['name'] }} · {{ bot['filename'] }}</p></div><a class="btn btn-outline" href="/dashboard#my-bots">← My Bots</a></div>
-<section class="panel" style="margin-bottom:16px">
-  <div class="panel-title"><div><div class="eyebrow">PROJECT SCOPE</div><h2>Restricted terminal</h2></div><span class="status-badge {{ bot['status'] }}">{{ bot['status'] }}</span></div>
-  <p class="muted" style="line-height:1.65">Commands run with this bot's project directory as the working folder. For safety, this terminal only supports the listed commands; arbitrary shell commands, package installs, network tools and paths outside the project are disabled.</p>
-  {% if not runtime_ready %}<p class="flash warning">Runtime folder is not ready yet. Start or restart an approved bot, then return here.</p>{% else %}<p class="muted">Project path: <code>{{ project_root }}</code></p>{% endif %}
-</section>
-<section class="panel terminal-panel">
-  <div class="panel-title"><div><div class="eyebrow">COMMAND CONSOLE</div><h2>Terminal</h2></div><button class="tiny-btn" type="button" onclick="document.getElementById('terminal-output').textContent='';">Clear output</button></div>
-  <div class="terminal-window">
-    <div class="terminal-bar"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span><span>cyberhost · bot terminal</span></div>
-    <pre id="terminal-output" class="terminal-output">{% if output %}{{ output }}{% else %}Welcome to the bot terminal. Type help to view available commands.{% endif %}</pre>
-    <form method="post" class="terminal-form" autocomplete="off">
-      <label for="command" class="terminal-prompt">user@bot:~$</label>
-      <input id="command" name="command" value="{{ command }}" placeholder="help" maxlength="500" autocapitalize="off" spellcheck="false" required>
-      <button type="submit" class="btn btn-primary" {% if not runtime_ready %}disabled{% endif %}>Run ↵</button>
+<div class="term-shell">
+  <header class="term-head">
+    <a class="term-back" href="/dashboard#my-bots" aria-label="Back to dashboard">‹</a>
+    <div class="term-title"><div class="term-kicker">CYBER HOST / WEB SHELL</div><h1>Terminal <span>_</span></h1><p>{{ bot['name'] }} · {{ bot['filename'] }}</p></div>
+    <span id="bot-state" class="term-state {{ 'is-live' if bot['status']=='running' else '' }}"><i></i>{{ bot['status'] }}</span>
+  </header>
+  <div class="term-toolbar">
+    <span><b>~/bot-{{ bot['id'] }}</b><small>{{ 'Project ready' if runtime_ready else 'Waiting for runtime' }}</small></span>
+    <div class="term-toolbar-actions"><button type="button" id="show-terminal" class="term-tab active">Terminal</button><button type="button" id="show-logs" class="term-tab">Live logs <span class="live-dot"></span></button><button type="button" id="clear-term" class="term-icon" title="Clear terminal">⌫</button></div>
+  </div>
+  <section class="term-screen" id="terminal-pane">
+    <div class="term-welcome"><div class="term-ascii">CYBER HOST <span>v1.0</span></div><p>Project terminal ready. Type <code>help</code> to list commands.</p><p class="term-muted">Working directory: {{ project_root or 'runtime not ready' }}</p></div>
+    <div id="term-history" class="term-history" aria-live="polite"></div>
+    <form id="term-form" class="term-input-row" autocomplete="off">
+      <label for="term-command"><span class="prompt-user">user@cyberhost</span><span class="prompt-path">:~/bot-{{ bot['id'] }}$</span></label>
+      <input id="term-command" name="command" placeholder="Type a command…" maxlength="500" autocapitalize="off" spellcheck="false" {% if not runtime_ready %}disabled{% endif %} required>
+      <button id="term-run" type="submit" aria-label="Run command" {% if not runtime_ready %}disabled{% endif %}>➜</button>
     </form>
-  </div>
-  <div class="terminal-help"><b>Quick commands</b>
-    <div class="terminal-shortcuts">
-      {% for cmd in ['help','pwd','ls','python --version','node --version','pip list'] %}
-      <button type="button" class="tiny-btn" onclick="document.getElementById('command').value={{ cmd|tojson }};document.getElementById('command').focus()">{{ cmd }}</button>
-      {% endfor %}
-    </div>
-    <p class="muted">File commands: <code>ls [relative-path]</code>, <code>cat filename.py</code>, <code>python -m py_compile filename.py</code>, <code>node --check filename.js</code>.</p>
-  </div>
-</section>
+    {% if not runtime_ready %}<div class="term-notice">Runtime folder isn't ready. Start/restart an approved bot first, then refresh this page.</div>{% endif %}
+  </section>
+  <section class="term-screen logs-screen" id="logs-pane" hidden>
+    <div class="logs-head"><span>BOT PROCESS OUTPUT</span><span id="live-status">Connecting…</span></div>
+    <pre id="live-logs">Connecting to live logs…</pre>
+    <div class="logs-foot">Auto-refreshes every 2 seconds · latest 48 KB</div>
+  </section>
+  <div class="term-quick"><span>QUICK COMMANDS</span><div>
+    {% for cmd in ['help','pwd','ls','python --version','pip list','node --version'] %}
+    <button type="button" class="quick-command" data-command="{{ cmd }}">{{ cmd }}</button>
+    {% endfor %}
+  </div></div>
+  <p class="term-footnote">Commands run one at a time. For safety on this shared host, this is a restricted project terminal—not a full Linux shell. Use your bot's own runtime/logs for long-running processes.</p>
+</div>
 <style>
-.terminal-panel{overflow:hidden}.terminal-window{border:1px solid #263449;border-radius:14px;overflow:hidden;background:#070b12;color:#e6edf7}.terminal-bar{display:flex;align-items:center;gap:7px;padding:12px 14px;background:#111827;border-bottom:1px solid #263449;font-size:12px;color:#9aa9bf}.terminal-dot{width:9px;height:9px;border-radius:50%;background:#5d6c83}.terminal-bar span:last-child{margin-left:7px}.terminal-output{box-sizing:border-box;min-height:190px;max-height:55vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:16px;color:#d7f7df;font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}.terminal-form{display:flex;align-items:center;gap:10px;padding:12px;border-top:1px solid #263449;flex-wrap:wrap}.terminal-prompt{color:#72e6a1;font:12px ui-monospace,monospace;white-space:nowrap}.terminal-form input{flex:1;min-width:100px;background:#0d1420;border:1px solid #2a394d;border-radius:8px;padding:12px;color:#fff;font:14px ui-monospace,monospace;outline:none}.terminal-form input:focus{border-color:#729aff}.terminal-help{padding-top:16px}.terminal-shortcuts{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.terminal-shortcuts button{background:#172337;color:#dbe6f8;border:1px solid #34445d}.terminal-help code,.terminal-panel code{overflow-wrap:anywhere}@media(max-width:600px){.page-heading{align-items:flex-start;gap:12px}.terminal-form{align-items:stretch}.terminal-prompt{width:100%}.terminal-form input{width:100%;flex-basis:100%}.terminal-form button{width:100%}.terminal-output{font-size:12px;padding:12px;min-height:160px}}
+.term-shell{--term-green:#7dff9b;--term-muted:#91a59b;max-width:1100px;margin:8px auto 24px;background:#050b08;border:1px solid #20352a;border-radius:20px;overflow:hidden;color:#d9f5e1;box-shadow:0 22px 80px #0005;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+.term-head{display:flex;align-items:center;gap:14px;padding:20px 22px;background:linear-gradient(135deg,#0e1c14,#09100c);border-bottom:1px solid #1c3325}.term-back{width:38px;height:38px;display:grid;place-items:center;border:1px solid #2a4934;border-radius:12px;color:var(--term-green);text-decoration:none;font-size:29px}.term-title{flex:1;min-width:0}.term-kicker{font-size:10px;letter-spacing:2px;color:#78a989}.term-title h1{margin:5px 0;font-size:24px;letter-spacing:-1px;color:#effff2}.term-title h1 span{color:var(--term-green);animation:blink 1s steps(2,start) infinite}.term-title p{margin:0;color:#8ea596;font-size:12px;overflow-wrap:anywhere}.term-state{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#f4c977;white-space:nowrap}.term-state i,.live-dot{display:inline-block;width:7px;height:7px;background:#d5a94f;border-radius:50%;margin-right:7px}.term-state.is-live i,.live-dot{background:var(--term-green);box-shadow:0 0 10px #7dff9b66}
+.term-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;background:#0a140e;border-bottom:1px solid #20352a}.term-toolbar>span{display:flex;flex-direction:column;gap:4px;min-width:0}.term-toolbar b{font-size:12px;color:#d5fbe0}.term-toolbar small{font-size:10px;color:#76917f}.term-toolbar-actions{display:flex;align-items:center;gap:6px}.term-tab,.term-icon{border:1px solid #294534;background:#101d14;color:#a7c6af;border-radius:8px;padding:9px 11px;font:inherit;font-size:11px;cursor:pointer}.term-tab.active{background:#163622;color:var(--term-green);border-color:#3a7850}.term-icon{font-size:17px;padding:5px 10px}.term-screen{background:#030805;min-height:370px}.term-welcome{padding:20px 22px 5px;color:#b8d8c1;font-size:12px}.term-ascii{font-weight:900;font-size:15px;letter-spacing:2px;color:var(--term-green)}.term-ascii span{font-size:10px;font-weight:400;color:#6b8c75}.term-welcome p{margin:9px 0}.term-muted{color:#63826c;font-size:11px;overflow-wrap:anywhere}.term-welcome code{color:#c7ffce}.term-history{padding:8px 22px 16px;min-height:65px;max-height:44vh;overflow:auto;font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.term-entry{margin:10px 0 15px}.term-command-line{color:var(--term-green);overflow-wrap:anywhere}.term-result{color:#d5e9d9;margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.term-result.error{color:#ff9a9a}.term-input-row{display:flex;align-items:center;gap:10px;padding:15px 18px;border-top:1px solid #1d3024;background:#08110b}.term-input-row label{font-size:11px;white-space:nowrap}.prompt-user{color:var(--term-green)}.prompt-path{color:#91ad9a}.term-input-row input{min-width:0;flex:1;background:transparent;border:0;outline:0;color:#f0fff3;font:13px ui-monospace,monospace;padding:9px 0}.term-input-row input::placeholder{color:#536b5a}.term-input-row button{width:38px;height:38px;border:1px solid #36764b;background:#163e25;color:var(--term-green);border-radius:10px;font-size:19px;cursor:pointer}.term-input-row button:disabled,.term-input-row input:disabled{opacity:.4}.term-notice{padding:12px 18px;color:#ffd68a;background:#241d0c;font-size:11px}.term-quick{padding:16px 18px;background:#0a140e;border-top:1px solid #20352a}.term-quick>span{display:block;font-size:9px;letter-spacing:1.8px;color:#6f9078;margin-bottom:11px}.term-quick>div{display:flex;flex-wrap:wrap;gap:7px}.quick-command{background:#0e1c13;color:#a9d6b4;border:1px solid #294534;border-radius:8px;padding:8px 10px;font:11px ui-monospace,monospace;cursor:pointer}.quick-command:active{border-color:var(--term-green);color:var(--term-green)}.term-footnote{margin:0;padding:0 18px 18px;color:#66816d;font:10px/1.7 ui-monospace,monospace}.logs-screen{padding:0}.logs-head{display:flex;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid #20352a;color:#8db99a;font-size:10px;letter-spacing:1px}.logs-head #live-status{color:var(--term-green)}#live-logs{min-height:320px;max-height:60vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:16px 18px;margin:0;color:#c9e8d0;font:11px/1.65 ui-monospace,monospace}.logs-foot{padding:12px 18px;color:#63826c;font-size:10px;border-top:1px solid #20352a}[hidden]{display:none!important}
+@keyframes blink{to{visibility:hidden}}
+@media(max-width:600px){.term-shell{margin:0 -3px 18px;border-radius:14px}.term-head{padding:16px 13px;gap:10px}.term-title h1{font-size:21px}.term-title p{font-size:10px}.term-state{font-size:9px}.term-toolbar{align-items:flex-start;padding:12px}.term-toolbar-actions{gap:4px;flex-wrap:wrap;justify-content:flex-end}.term-tab{padding:8px 7px;font-size:10px}.term-icon{padding:5px 8px}.term-screen{min-height:330px}.term-welcome{padding:17px 13px 4px}.term-history{padding:8px 13px 14px;font-size:11px;max-height:42vh}.term-input-row{padding:10px;gap:7px;flex-wrap:wrap}.term-input-row label{width:100%;font-size:10px}.term-input-row input{font-size:13px;flex-basis:calc(100% - 48px)}.term-input-row button{flex-shrink:0}.term-quick{padding:14px 12px}.term-quick>div{gap:6px}.quick-command{font-size:10px;padding:8px}.term-footnote{padding:0 12px 14px}.logs-head{padding:12px}#live-logs{padding:12px;font-size:10px}}
 </style>
+<script>
+(function(){
+  const form=document.getElementById('term-form'), input=document.getElementById('term-command');
+  const history=document.getElementById('term-history'), run=document.getElementById('term-run');
+  const terminalPane=document.getElementById('terminal-pane'), logsPane=document.getElementById('logs-pane');
+  const logs=document.getElementById('live-logs'), liveStatus=document.getElementById('live-status');
+  const basePath={{ url_for('bot_terminal',bot_id=bot['id'])|tojson }};
+  let busy=false, previousLogs='';
+  function addEntry(command, output, isError){
+    const entry=document.createElement('div');entry.className='term-entry';
+    const cmd=document.createElement('div');cmd.className='term-command-line';cmd.textContent='user@cyberhost:~/bot-{{ bot["id"] }}$ '+command;entry.appendChild(cmd);
+    const result=document.createElement('pre');result.className='term-result'+(isError?' error':'');result.textContent=output||'(no output)';entry.appendChild(result);
+    history.appendChild(entry);history.scrollTop=history.scrollHeight;
+  }
+  async function execute(command){
+    if(!command||busy)return;busy=true;run.disabled=true;input.disabled=true;addEntry(command,'Running…',false);
+    const entry=history.lastElementChild, result=entry.querySelector('.term-result');
+    try{
+      const response=await fetch(basePath,{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'fetch'},body:JSON.stringify({command})});
+      const data=await response.json();result.textContent=data.output||'(command completed with no output)';result.classList.toggle('error',!data.ok||/not supported|not found|timed out|disabled|error/i.test(data.output||'')); 
+    }catch(e){result.textContent='Request failed. Check your connection and try again.';result.classList.add('error');}
+    busy=false;run.disabled=false;input.disabled=false;input.focus();history.scrollTop=history.scrollHeight;
+  }
+  form.addEventListener('submit',function(e){e.preventDefault();const command=input.value.trim();if(!command)return;input.value='';execute(command);});
+  document.querySelectorAll('.quick-command').forEach(btn=>btn.addEventListener('click',()=>{input.value=btn.dataset.command;input.focus();}));
+  document.getElementById('clear-term').addEventListener('click',()=>{history.textContent='';input.focus();});
+  document.getElementById('show-terminal').addEventListener('click',()=>{terminalPane.hidden=false;logsPane.hidden=true;document.getElementById('show-terminal').classList.add('active');document.getElementById('show-logs').classList.remove('active');input.focus();});
+  document.getElementById('show-logs').addEventListener('click',()=>{terminalPane.hidden=true;logsPane.hidden=false;document.getElementById('show-logs').classList.add('active');document.getElementById('show-terminal').classList.remove('active');refreshLogs();});
+  async function refreshLogs(){try{const r=await fetch(basePath+'/live',{cache:'no-store'});const d=await r.json();if(d.logs!==previousLogs){logs.textContent=d.logs||'No bot logs yet.';logs.scrollTop=logs.scrollHeight;previousLogs=d.logs;}liveStatus.textContent=d.alive?'● PROCESS RUNNING':'○ PROCESS STOPPED';document.getElementById('bot-state').classList.toggle('is-live',d.alive);}catch(e){liveStatus.textContent='Connection lost';}}
+  setInterval(refreshLogs,2000);refreshLogs();
+  input.focus();
+})();
+</script>
 {% endblock %}
