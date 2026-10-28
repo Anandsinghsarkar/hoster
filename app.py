@@ -833,7 +833,9 @@ def _terminal_execute(root, command, bot_id):
             "  python --version                  Python version\n"
             "  python <file.py> [args...]        Run a project Python script (20s limit)\n"
             "  python -m py_compile <file.py>    Check Python syntax\n"
-            "  pip list                          List installed Python packages\n"
+            "  pip list                          List project-local Python packages\n"
+            "  pip install <package>             Install into this bot's vendor folder\n"
+            "  pip install -r requirements.txt   Install project requirements locally\n"
             "  node --version                    Node.js version\n"
             "  node <file.js> [args...]          Run a project JS script (20s limit)\n"
             "  node --check <file.js>             Check JavaScript syntax\n"
@@ -956,7 +958,7 @@ def bot_terminal(bot_id):
             try:
                 output = _terminal_execute(root, command, bot_id)
             except subprocess.TimeoutExpired:
-                output = "Command timed out. Script commands have a 20-second limit."
+                output = "Command timed out. Script commands have a 20-second limit; dependency installs have a 90-second limit."
             except (ValueError, OSError) as exc:
                 output = str(exc)
         output = (output or "(command completed with no output)")[-20000:]
