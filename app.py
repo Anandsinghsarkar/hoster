@@ -912,6 +912,25 @@ def revoke_api_token(token_id):
     flash("API token revoked. Requests using it will stop working.", "success")
     return redirect(url_for("admin") + "#api-access")
 
+@app.get("/admin/bot/<int:bot_id>/file")
+@admin_required
+def admin_bot_file(bot_id):
+    with db() as c:
+        bot = c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'", (bot_id,)).fetchone()
+    if not bot:
+        abort(404)
+    source = UPLOADS / bot["filename"]
+    if not source.is_file() and _storage_enabled():
+        _storage_download_file("uploads/" + bot["filename"], source)
+    if not source.is_file():
+        return Response("Uploaded file is unavailable. Check Supabase Storage and Render logs.", status=404, mimetype="text/plain")
+    is_zip = source.suffix.lower() == ".zip"
+    disposition = "attachment" if is_zip else "inline"
+    mime = "application/zip" if is_zip else "text/plain; charset=utf-8"
+    return Response(source.read_bytes(), mimetype=mime,
+                    headers={"Content-Disposition": f'{disposition}; filename="{secure_filename(bot["filename"])}"',
+                             "Cache-Control":"no-store", "X-Content-Type-Options":"nosniff"})
+
 @app.post("/admin/bot/<int:bot_id>/<action>")
 @admin_required
 def admin_bot(bot_id, action):
