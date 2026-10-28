@@ -1014,7 +1014,7 @@ def bot_terminal(bot_id):
         if not command:
             output = "Enter a command. Type help to see supported commands."
         elif not root:
-            output = "Project files are not ready. Start/restart the approved bot first."
+            output = "Project workspace is unavailable. Check that the uploaded file still exists in storage, then retry."
         else:
             try:
                 output = _terminal_execute(root, command, bot_id)
