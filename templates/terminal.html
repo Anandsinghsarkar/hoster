@@ -45,7 +45,19 @@
   const terminalPane=document.getElementById('terminal-pane'), logsPane=document.getElementById('logs-pane');
   const logs=document.getElementById('live-logs'), liveStatus=document.getElementById('live-status');
   const basePath={{ url_for('bot_terminal',bot_id=bot['id'])|tojson }};
+  const historyKey='cyberhost-terminal-history-{{ bot["id"] }}';
   let busy=false, previousLogs='';
+  try{
+    const saved=JSON.parse(localStorage.getItem(historyKey)||'[]');
+    saved.slice(-40).forEach(item=>addEntry(item.command,item.output,item.error));
+  }catch(e){}
+  function saveHistory(command, output, error){
+    try{
+      const saved=JSON.parse(localStorage.getItem(historyKey)||'[]');
+      saved.push({command,output,error:!!error,at:Date.now()});
+      localStorage.setItem(historyKey,JSON.stringify(saved.slice(-40)));
+    }catch(e){}
+  }
   function addEntry(command, output, isError){
     const entry=document.createElement('div');entry.className='term-entry';
     const cmd=document.createElement('div');cmd.className='term-command-line';cmd.textContent='user@cyberhost:~/bot-{{ bot["id"] }}$ '+command;entry.appendChild(cmd);
@@ -57,13 +69,13 @@
     const entry=history.lastElementChild, result=entry.querySelector('.term-result');
     try{
       const response=await fetch(basePath,{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'fetch'},body:JSON.stringify({command})});
-      const data=await response.json();result.textContent=data.output||'(command completed with no output)';result.classList.toggle('error',!data.ok||/not supported|not found|timed out|disabled|error/i.test(data.output||'')); 
-    }catch(e){result.textContent='Request failed. Check your connection and try again.';result.classList.add('error');}
+      const data=await response.json();result.textContent=data.output||'(command completed with no output)';result.classList.toggle('error',!data.ok||/not supported|not found|timed out|disabled|error/i.test(data.output||''));saveHistory(command,result.textContent,result.classList.contains('error'));
+    }catch(e){result.textContent='Request failed. Check your connection and try again.';result.classList.add('error');saveHistory(command,result.textContent,true);}
     busy=false;run.disabled=false;input.disabled=false;input.focus();history.scrollTop=history.scrollHeight;
   }
   form.addEventListener('submit',function(e){e.preventDefault();const command=input.value.trim();if(!command)return;input.value='';execute(command);});
   document.querySelectorAll('.quick-command').forEach(btn=>btn.addEventListener('click',()=>{input.value=btn.dataset.command;input.focus();}));
-  document.getElementById('clear-term').addEventListener('click',()=>{history.textContent='';input.focus();});
+  document.getElementById('clear-term').addEventListener('click',()=>{history.textContent='';try{localStorage.removeItem(historyKey);}catch(e){}input.focus();});
   document.getElementById('show-terminal').addEventListener('click',()=>{terminalPane.hidden=false;logsPane.hidden=true;document.getElementById('show-terminal').classList.add('active');document.getElementById('show-logs').classList.remove('active');input.focus();});
   document.getElementById('show-logs').addEventListener('click',()=>{terminalPane.hidden=true;logsPane.hidden=false;document.getElementById('show-logs').classList.add('active');document.getElementById('show-terminal').classList.remove('active');refreshLogs();});
   async function refreshLogs(){try{const r=await fetch(basePath+'/live',{cache:'no-store'});const d=await r.json();if(d.logs!==previousLogs){logs.textContent=d.logs||'No bot logs yet.';logs.scrollTop=logs.scrollHeight;previousLogs=d.logs;}liveStatus.textContent=d.alive?'● PROCESS RUNNING':'○ PROCESS STOPPED';document.getElementById('bot-state').classList.toggle('is-live',d.alive);}catch(e){liveStatus.textContent='Connection lost';}}
