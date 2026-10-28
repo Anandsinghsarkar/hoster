@@ -7,4 +7,55 @@
 <div class="two-col"><section class="panel"><div class="panel-title"><div><div class="eyebrow">MEMBER MANAGEMENT</div><h2>Users & credits</h2></div></div><div class="user-list">{% for u in users %}<div class="user-row"><div class="user-avatar">{{ u['username'][:1]|upper }}</div><div class="user-meta"><b>{{ u['username'] }} {% if u['is_admin'] %}<span class="soft-tag">ADMIN</span>{% endif %}</b><small>{{ u['created_at'] }} · {{ u['credits'] }} credits</small></div><form method="post" action="/admin/user/{{ u['id'] }}/credits" class="credit-form"><input name="amount" type="number" value="10" aria-label="Credit adjustment"><button class="tiny-btn">Adjust</button></form></div>{% endfor %}</div></section>
 <section class="panel"><div class="panel-title"><div><div class="eyebrow">BRAND & CHECKOUT</div><h2>Platform settings</h2></div></div><form method="post" action="/admin/settings" class="form-grid"><label>Website name<input name="site_name" value="{{ settings.get('site_name','CYBER HOST') }}"></label><label>UPI ID<input name="upi_id" value="{{ settings.get('upi_id','') }}"></label><label>Payment QR image URL<input name="payment_qr_url" value="{{ settings.get('payment_qr_url','') }}" placeholder="https://..."></label><label>Support text<textarea name="support_text" rows="2">{{ settings.get('support_text','') }}</textarea></label><label class="check-label"><input type="checkbox" name="maintenance" value="1" {% if settings.get('maintenance')=='1' %}checked{% endif %}> Maintenance mode flag (display only)</label><button class="btn btn-primary">Save settings</button></form></section></div>
 <section class="panel"><div class="panel-title"><div><div class="eyebrow">PACKAGE CONFIGURATION</div><h2>Plans & pricing</h2></div></div><div class="plan-edit-grid">{% for p in plans %}<form method="post" action="/admin/plan" class="plan-edit"><input type="hidden" name="id" value="{{ p['id'] }}"><label>Plan name<input name="name" value="{{ p['name'] }}" required></label><div class="input-pair"><label>Price ₹<input name="price" type="number" step="0.01" value="{{ p['price'] }}" required></label><label>Credits<input name="credits" type="number" value="{{ p['credits'] }}" required></label></div><div class="input-pair"><label>Bot limit<input name="bot_limit" type="number" value="{{ p['bot_limit'] }}" required></label><label>Validity days<input name="days" type="number" value="{{ p['days'] }}" required></label></div><label class="check-label"><input type="checkbox" name="active" value="1" {% if p['active'] %}checked{% endif %}> Active</label><button class="btn btn-outline full">Save {{ p['name'] }}</button></form>{% endfor %}</div><h3 class="subhead">Add a new plan</h3><form method="post" action="/admin/plan" class="new-plan-form"><input name="name" placeholder="Plan name" required><input name="price" type="number" step="0.01" placeholder="Price ₹" required><input name="credits" type="number" placeholder="Credits" required><input name="bot_limit" type="number" placeholder="Bot limit" required><input name="days" type="number" placeholder="Validity days" required><input type="hidden" name="active" value="1"><button class="btn btn-primary">Add plan +</button></form></section>
+
+<section class="panel" id="api-access" style="margin:16px 0;">
+  <div class="panel-title"><div><div class="eyebrow">DEVELOPER ACCESS</div><h2>API tokens & permissions</h2></div><span class="soft-tag">API v1</span></div>
+  <p class="muted" style="line-height:1.65;">Create a personal API token like GitHub. Select only the permissions the integration needs. The full token is shown only once; copy it and store it securely. Do not paste it into public frontend JavaScript or share it in screenshots.</p>
+  {% if new_api_token %}
+  <div class="panel" style="border:1px solid var(--accent,#16a34a);margin:12px 0;">
+    <h3>Copy your new token now</h3>
+    <p class="muted">This is the only time the full token will be displayed.</p>
+    <textarea id="new-api-token" rows="3" readonly style="width:100%;overflow-wrap:anywhere;">{{ new_api_token.token }}</textarea>
+    <button class="tiny-btn" type="button" onclick="navigator.clipboard.writeText(document.getElementById('new-api-token').value).then(()=>this.textContent='Copied!').catch(()=>alert('Select and copy the token manually.'))">Copy token</button>
+    <p><b>Expires:</b> {{ new_api_token.expires_at }} · <b>Permissions:</b> {{ new_api_token.scopes|join(', ') }}</p>
+  </div>
+  {% endif %}
+  <form method="post" action="/admin/api-tokens" class="form-grid">
+    <label>Token name<input name="name" required maxlength="80" placeholder="e.g. Android automation"></label>
+    <label>Expiry<select name="days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">365 days</option></select></label>
+    <div class="form-grid" style="grid-column:1/-1;gap:10px;">
+      <b>Choose permissions (scopes)</b>
+      {% for scope, description in api_scopes.items() %}
+      <label class="check-label" style="align-items:flex-start;"><input type="checkbox" name="scopes" value="{{ scope }}"><span><b>{{ scope }}</b><br><small class="muted">{{ description }}</small></span></label>
+      {% endfor %}
+    </div>
+    <button class="btn btn-primary" type="submit">Generate API token</button>
+  </form>
+  <h3 class="subhead">Existing tokens</h3>
+  <div class="table-scroll"><table><thead><tr><th>NAME / PREFIX</th><th>PERMISSIONS</th><th>EXPIRES</th><th>LAST USED</th><th>STATUS / ACTION</th></tr></thead><tbody>
+  {% for token in api_tokens %}
+  <tr><td><b>{{ token['name'] }}</b><small>{{ token['token_prefix'] }}</small><small>Created {{ token['created_at'] }}</small></td>
+  <td>{{ token['scopes'].replace(',', ', ') }}</td><td>{{ token['expires_at'] or 'No expiry' }}</td><td>{{ token['last_used_at'] or 'Never' }}</td>
+  <td>{% if token['revoked_at'] %}<span class="status-badge rejected">Revoked</span>{% else %}<span class="status-badge online">Active</span><form method="post" action="/admin/api-tokens/{{ token['id'] }}/revoke" onsubmit="return confirm('Revoke this API token? Integrations using it will stop working.')"><button class="tiny-btn danger-btn" type="submit">Revoke</button></form>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="5">No API tokens created yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <h3 class="subhead">API quick start</h3>
+  <p class="muted">Base URL: <code>{{ request.url_root }}api/v1</code></p>
+  <p class="muted">Send this header from your server/backend: <code>Authorization: Bearer YOUR_TOKEN</code></p>
+  <div class="table-scroll"><table><thead><tr><th>Method / endpoint</th><th>Permission</th><th>Purpose</th></tr></thead><tbody>
+    <tr><td><code>GET /api/v1</code></td><td>Public</td><td>API discovery / endpoint list</td></tr>
+    <tr><td><code>GET /api/v1/me</code></td><td>Any valid token</td><td>Check token and granted scopes</td></tr>
+    <tr><td><code>GET /api/v1/settings</code></td><td><code>site:read</code></td><td>Read public site settings</td></tr>
+    <tr><td><code>GET /api/v1/users</code></td><td><code>users:read</code></td><td>List up to 500 users</td></tr>
+    <tr><td><code>GET /api/v1/bots</code>, <code>GET /api/v1/bots/ID</code></td><td><code>bots:read</code></td><td>Read bot status/details</td></tr>
+    <tr><td><code>POST /api/v1/bots/ID/actions/approve|reject|stop|restart</code></td><td><code>bots:control</code></td><td>Moderate or control a bot process</td></tr>
+    <tr><td><code>DELETE /api/v1/bots/ID</code></td><td><code>bots:delete</code></td><td>Delete bot and stored files</td></tr>
+    <tr><td><code>GET /api/v1/payments</code></td><td><code>payments:read</code></td><td>Read payment status/reference data</td></tr>
+  </tbody></table></div>
+  <p class="muted" style="line-height:1.65;">API errors use JSON with HTTP status 401 (invalid token), 403 (missing scope), or 404 (not found). List endpoints are limited to 500 records. Revoke a token immediately if it may have leaked. Keep tokens server-side; API access is powerful and bot controls can execute uploaded code.</p>
+</section>
+<script>
+(function(){const el=document.getElementById('new-api-token');if(el){el.focus();el.select();}})();
+</script>
+
 {% endblock %}
