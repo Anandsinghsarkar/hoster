@@ -574,17 +574,17 @@ def _write_log(bot_id, message):
         handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}] {message}\n")
         handle.flush()
 
-def _recent_log_excerpt(bot_id, max_chars=1400):
-    """Return recent bot output so crash messages contain the real traceback/error."""
+def _recent_log_excerpt(bot_id, max_chars=5000):
+    """Return enough recent output to include startup tracebacks and pip errors."""
     try:
         path = LOGS / f"{bot_id}.log"
         with path.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
-            handle.seek(max(0, size - max_chars * 3))
+            handle.seek(max(0, size - max_chars * 4))
             data = handle.read().decode("utf-8", errors="replace")
         lines = [line for line in data.splitlines() if line.strip()]
-        return "\n".join(lines[-14:])[-max_chars:]
+        return "\n".join(lines[-50:])[-max_chars:]
     except OSError:
         return ""
 
