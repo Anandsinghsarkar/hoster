@@ -23,6 +23,37 @@ A premium-styled Flask starter for managing user-uploaded Python, JavaScript and
 - Payment approval adds the plan's credits. Plan bot limits/duration are displayed/configurable but must be enforced with a proper entitlement system before real paid use.
 - Set a strong `SECRET_KEY` and `ADMIN_PASSWORD`. Do not use the sample admin password in production.
 
+
+## Scoped API tokens (GitHub-style permissions)
+The Admin console now includes **API tokens & permissions**. Admins can generate a named bearer token, choose individual scopes, select a 30/90/180/365-day expiry, review last-used time, and revoke a token. The full token is shown only once; only its SHA-256 hash is stored in the database.
+
+### Authentication
+Send the token from a trusted server/backend, never from public browser JavaScript:
+```http
+Authorization: Bearer ch_live_YOUR_TOKEN
+```
+The API root `GET /api/v1` lists supported endpoints. Successful responses are JSON. Invalid/expired/revoked tokens return HTTP 401; missing permissions return HTTP 403. User and bot list endpoints are limited to the latest 500 records.
+
+### Permissions and endpoints
+| Scope | Endpoints | Access |
+| --- | --- | --- |
+| No scope | `GET /api/v1` | Public API discovery |
+| Any valid token | `GET /api/v1/me` | Token name, ID and granted scopes |
+| `site:read` | `GET /api/v1/settings` | Public site name, support text and maintenance flag |
+| `users:read` | `GET /api/v1/users` | User IDs, usernames, admin flags, credits and creation dates |
+| `bots:read` | `GET /api/v1/bots`, `GET /api/v1/bots/<id>` | Bot metadata, status and last error |
+| `bots:control` | `POST /api/v1/bots/<id>/actions/approve`, `reject`, `stop`, or `restart` | Approve/reject or control bot process |
+| `bots:delete` | `DELETE /api/v1/bots/<id>` | Delete bot record, upload and runtime folder |
+| `payments:read` | `GET /api/v1/payments` | Payment status, package, username and UTR/reference |
+
+Example request:
+```bash
+curl -H "Authorization: Bearer ch_live_YOUR_TOKEN" \
+  https://YOUR-HOST/api/v1/bots
+```
+
+**Security:** issue only the minimum scopes required. Treat tokens like passwords, keep them in server-side environment variables, do not commit them to GitHub, and revoke immediately if exposed. The `bots:control` scope can launch uploaded code; only grant it to trusted integrations. This starter does not yet provide API token rate limiting, audit event history, pagination, or write access to users/payments/settings. Protect the admin account and use HTTPS.
+
 ## Local run
 ```bash
 python -m venv .venv
