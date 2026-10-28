@@ -574,6 +574,20 @@ def _write_log(bot_id, message):
         handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}] {message}\n")
         handle.flush()
 
+def _recent_log_excerpt(bot_id, max_chars=1400):
+    """Return recent bot output so crash messages contain the real traceback/error."""
+    try:
+        path = LOGS / f"{bot_id}.log"
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - max_chars * 3))
+            data = handle.read().decode("utf-8", errors="replace")
+        lines = [line for line in data.splitlines() if line.strip()]
+        return "\\n".join(lines[-14:])[-max_chars:]
+    except OSError:
+        return ""
+
 def stop_process(bot_id):
     with process_lock:
         proc = processes.pop(bot_id, None)
@@ -757,7 +771,12 @@ def run_bot(bot):
             )
             time.sleep(1.0)
             if proc.poll() is not None:
-                raise RuntimeError(f"Process exited during startup (exit code {proc.returncode}); see logs below.")
+                log.flush()
+                details = _recent_log_excerpt(bot_id)
+                raise RuntimeError(
+                    f"Process exited during startup (exit code {proc.returncode}). "
+                    f"Recent bot output: {details or 'No application output was captured.'}"
+                )
             with process_lock:
                 processes[bot_id] = proc
             with db() as c:
@@ -773,10 +792,16 @@ def run_bot(bot):
             with db() as c:
                 row = c.execute("SELECT status FROM bots WHERE id=?", (bot_id,)).fetchone()
                 if row and row["status"] == "running":
-                    error = "" if exit_code == 0 else f"Process exited with code {exit_code}. Open Live logs and copy the traceback."
+                    details = _recent_log_excerpt(bot_id) if exit_code != 0 else ""
+                    error = "" if exit_code == 0 else (
+                        f"Process exited with code {exit_code}. "
+                        f"Recent output: {details or 'No traceback captured; open Live logs.'}"
+                    )
                     c.execute("UPDATE bots SET status=?,last_error=? WHERE id=?",
-                              ("stopped" if exit_code == 0 else "error", error, bot_id))
+                              ("stopped" if exit_code == 0 else "error", error[:500], bot_id))
             _write_log(bot_id, f"[system] Process exited with code {exit_code}.")
+            if exit_code != 0:
+                _write_log(bot_id, "[diagnostic] Last bot output: " + (_recent_log_excerpt(bot_id) or "No output captured."))
         threading.Thread(target=monitor, daemon=True).start()
     except Exception as exc:
         message = f"{type(exc).__name__}: {exc}"
