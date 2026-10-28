@@ -15,7 +15,8 @@ A premium-styled Flask starter for managing user-uploaded Python, JavaScript and
 - This cannot guarantee 24/7 uptime. Render can restart services or suspend free instances independently of app code, and self-pings may not prevent sleep in every configuration. Render's official free-instance documentation describes the 15-minute idle spin-down and ephemeral filesystem limitations: https://render.com/docs/free. Do not rely on this as a production uptime guarantee.
 
 ## Important production notes
-- This diskless setup stores the SQLite database, uploads, runtime files, and current log files under `/tmp/cyberhost-data`. It avoids the `/var/data` permission error, but `/tmp` is temporary storage: accounts, uploads, logs, and settings may be lost when the service restarts, redeploys, or the instance is replaced. Running bot processes also stop when the service instance is replaced. Reliable persistence requires an external database and durable file storage; reliable long-running bot hosting should use a separate worker service.
+- When `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, and `SUPABASE_STORAGE_BUCKET=bot-files` are configured, the app stores uploaded project files in the private Supabase Storage bucket and uploads a snapshot of its SQLite database to `_system/hosting.db` after database writes. On a new Render instance it downloads that snapshot, rehydrates missing uploads, and starts bots whose saved status was `approved` or `running`. Logs and runtime dependency folders are still local and may reset; dependencies are rebuilt when bots relaunch. If Supabase is not configured, the app falls back to temporary local storage.
+- **Important architecture limit:** this diskless implementation keeps the app's database as one SQLite snapshot object in Supabase Storage, not as normalized tables in Supabase Postgres. It is intended for one Render web instance only; do not scale to multiple instances or use as a high-concurrency production database. Snapshot upload errors are logged to Render. Long-running bot hosting should ideally run in isolated worker containers with a real managed database and process supervisor.
 - Approved bot files launch as real child processes, stdout/stderr are captured in the Live logs page, and process exits update the bot status. For ZIP Python projects, the app automatically installs dependencies from `requirements.txt`; for a single `.py` upload it tries to detect and install a limited set of common libraries. For uncommon/custom Python packages, upload a ZIP containing `bot.py` and `requirements.txt`. For JavaScript ZIP projects, it runs `npm install` when `package.json` exists, then uses the `start` script or the detected JS entry file. The logs page has Copy logs and Copy error buttons. Setup commands can take a few minutes and their output is included in logs.
 - This is still a starter, not a hardened multi-tenant execution service. Uploaded programs are arbitrary code and can access the app container's files and network. **Do not allow unknown users' uploads on a public production service without isolated containers/sandboxing, strict CPU/RAM/time/network limits, per-user quotas, malware review, and security testing.**
 - Bot processes started by this app are local child processes. They are not supervised across every deploy/instance change; for reliable 24/7 operation, use a dedicated worker/container service and a process supervisor.
@@ -63,3 +64,14 @@ pip install -r requirements.txt
 python app.py
 ```
 Open `http://127.0.0.1:10000`. Initial admin defaults to `admin` / `ChangeMe123!` only when no admin exists. Override using environment variables.
+
+## Supabase persistence setup
+1. In Supabase, create a **private Storage bucket** named `bot-files` (do not make it public).
+2. In Render → your service → Environment, add:
+   - `SUPABASE_URL`: Project URL from Supabase → Project Settings → API.
+   - `SUPABASE_SERVICE_KEY`: server-side service-role/secret key from the same API settings. Never expose it in HTML, JavaScript, screenshots, or GitHub.
+   - `SUPABASE_STORAGE_BUCKET`: `bot-files`.
+3. Save the variables and redeploy. The app uses the bucket for `uploads/<stored-filename>` and `_system/hosting.db`. A successful file upload is rejected if the configured Storage upload fails.
+4. Confirm the private bucket contains both the uploaded bot objects and `_system/hosting.db`; inspect Render logs for any `[supabase-storage]` errors.
+
+The service key has broad project privileges. Use it only as a Render secret. This approach persists the existing SQLite database as a Storage object so no SQL schema setup is required; it is not a Supabase Postgres migration and is not suitable for multiple app instances. If you already have data only in Render's ephemeral `/tmp`, that old data cannot be recovered after it has been lost.
