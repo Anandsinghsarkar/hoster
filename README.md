@@ -17,6 +17,12 @@ A premium-styled Flask starter for managing user-uploaded Python, JavaScript and
 - Admin dashboard shows bot counts, pending reviews, approved purchase totals, and per-user approved purchase amounts. The user's dashboard shows their own bots, payment requests, and approved purchase total.
 - This is a manual UPI/UTR flow: submitting a UTR creates a pending request. An admin must verify the payment and approve it; this starter does not automatically verify bank transfers.
 
+## Per-bot web terminal
+- A **Terminal** button is available in the user's bot table and the admin review table. It only opens a bot the signed-in user owns, unless the viewer is an admin.
+- The mobile-friendly terminal runs in the selected bot's runtime/project folder and supports `help`, `pwd`, `ls`, `cat <relative-file>`, `python --version`, `node --version`, `pip list`, `python -m py_compile <file.py>`, and `node --check <file.js>`.
+- For safety, it does not provide an unrestricted Linux shell, arbitrary system commands, shell operators, package installation, or paths outside the selected bot project. Commands have short timeouts and output limits. The bot must have been started at least once so its runtime folder exists.
+- This is a restricted convenience terminal, not a security sandbox. This starter runs uploaded bot code in the same host environment; do not expose it to untrusted public users without moving bot execution into isolated containers with CPU/memory/process limits.
+
 ## Login persistence and health ping
 - Successful login creates a permanent Flask session cookie that lasts up to 365 days and refreshes as the user visits the site. It ends when the user signs out, clears browser cookies, or the cookie expires. Keep Render's generated SECRET_KEY stable between deploys; changing it invalidates existing sessions.
 - The /health and /ping endpoints return a lightweight ok response for health checks. When KEEP_ALIVE_ENABLED=true and RENDER_EXTERNAL_URL is available, the app makes a best-effort request to its own health endpoint every 10 minutes. You can change the interval with KEEP_ALIVE_INTERVAL_MINUTES (supported range 5–14) or set KEEP_ALIVE_URL to the public base URL.
