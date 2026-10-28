@@ -816,7 +816,7 @@ def _terminal_safe_file(root, raw_name):
         raise ValueError("File is larger than the 256 KB terminal-view limit.")
     return candidate
 
-def _terminal_execute(root, command):
+def _terminal_execute(root, command, bot_id):
     import shlex
     parts = shlex.split(command)
     if not parts:
@@ -857,10 +857,28 @@ def _terminal_execute(root, command):
     if parts == ["python", "--version"]:
         result = subprocess.run([sys.executable, "--version"], cwd=str(root), capture_output=True, text=True, timeout=5)
         return (result.stdout + result.stderr).strip()
+    vendor = (RUNTIMES / str(bot_id) / "vendor").resolve()
+    vendor.mkdir(parents=True, exist_ok=True)
     if parts == ["pip", "list"]:
-        result = subprocess.run([sys.executable, "-m", "pip", "list", "--format=columns"], cwd=str(root),
-                                capture_output=True, text=True, timeout=8)
-        return (result.stdout + result.stderr).strip()[-20000:]
+        result = subprocess.run([sys.executable, "-m", "pip", "list", "--path", str(vendor), "--format=columns"],
+                                cwd=str(root), capture_output=True, text=True, timeout=8)
+        return (result.stdout + result.stderr).strip()[-20000:] or "No project-local Python packages installed."
+    if len(parts) >= 3 and parts[:2] == ["pip", "install"]:
+        if parts[2] == "-r":
+            if len(parts) != 4:
+                raise ValueError("Use: pip install -r requirements.txt")
+            req_file = _terminal_safe_file(root, parts[3])
+            if req_file.name != "requirements.txt":
+                raise ValueError("For safety, pip install -r only accepts a project requirements.txt file.")
+            packages = ["-r", str(req_file)]
+        else:
+            packages = parts[2:]
+            if any(p.startswith("-") for p in packages):
+                raise ValueError("pip options are restricted. Use: pip install package-name")
+        result = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                                 "--no-warn-script-location", "--target", str(vendor), *packages],
+                                cwd=str(root), capture_output=True, text=True, timeout=90)
+        return ((result.stdout or "") + (result.stderr or "")).strip()[-20000:] or f"pip exited with code {result.returncode}."
     if parts in (["npm", "--version"], ["node", "--version"]):
         binary = shutil.which(parts[0])
         if not binary:
@@ -893,7 +911,11 @@ def _terminal_execute(root, command):
         target = _terminal_safe_file(root, parts[1])
         if target.suffix.lower() != ".py":
             raise ValueError("python can only run a project .py file.")
-        result = subprocess.run([sys.executable, str(target), *parts[2:]], cwd=str(root),
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        vendor = (RUNTIMES / str(bot_id) / "vendor").resolve()
+        env["PYTHONPATH"] = str(vendor) + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
+        result = subprocess.run([sys.executable, str(target), *parts[2:]], cwd=str(root), env=env,
                                 capture_output=True, text=True, timeout=20)
         return ((result.stdout or "") + (result.stderr or "")).strip() or f"Process exited with code {result.returncode} (no output)."
     if len(parts) >= 2 and parts[0] == "node":
@@ -932,7 +954,7 @@ def bot_terminal(bot_id):
             output = "Project files are not ready. Start/restart the approved bot first."
         else:
             try:
-                output = _terminal_execute(root, command)
+                output = _terminal_execute(root, command, bot_id)
             except subprocess.TimeoutExpired:
                 output = "Command timed out. Script commands have a 20-second limit."
             except (ValueError, OSError) as exc:
