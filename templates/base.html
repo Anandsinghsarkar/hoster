@@ -9,6 +9,13 @@
 {% block content %}{% endblock %}
 <footer><span>© 2026 {{ site_name or 'CYBER HOST' }}</span><span>Built for builders · Secure by design</span></footer>
 </main>
+{% if current_user and request.endpoint != 'bot_terminal' %}
+{% if bot is defined and bot %}
+<a class="floating-terminal" href="/bot/{{ bot['id'] }}/terminal" aria-label="Open bot terminal"><span>›_</span><b>Terminal</b></a>
+{% elif bots is defined and bots %}
+<a class="floating-terminal" href="/bot/{{ bots[0]['id'] }}/terminal" aria-label="Open first bot terminal"><span>›_</span><b>Terminal</b></a>
+{% endif %}
+{% endif %}
 {% if current_user %}
 <nav class="mobile-bottom-nav" aria-label="Main navigation">
 {% if current_user['is_admin'] %}
@@ -19,6 +26,9 @@
 </nav>
 {% endif %}
 <style>
+.floating-terminal{position:fixed;z-index:10000;right:22px;bottom:22px;display:flex;align-items:center;gap:9px;padding:13px 17px;border:1px solid #4e9364;border-radius:999px;background:linear-gradient(135deg,#123a22,#07150c);box-shadow:0 8px 30px #0007;color:#b8ffc7;text-decoration:none;font:600 12px ui-monospace,monospace;letter-spacing:.3px}
+.floating-terminal span{font-size:18px;color:#7dff9b}
+.floating-terminal:active{transform:translateY(1px)}
 .mobile-bottom-nav{display:none}
 @media(max-width:760px){
  body{padding-bottom:88px}
@@ -27,7 +37,7 @@
  .mobile-bottom-nav a span{font-size:21px;line-height:1.1;font-weight:700}
  .mobile-bottom-nav a small{font-size:10px;white-space:nowrap}
  .mobile-bottom-nav a:active{background:rgba(110,150,255,.18)}
- .container{padding-left:12px;padding-right:12px}
+ .container{padding-left:12px;padding-right:12px}.floating-terminal{right:12px;bottom:calc(88px + env(safe-area-inset-bottom));padding:11px 14px}
  .table-scroll{max-width:100%;overflow-x:auto}
 }
 </style>
