@@ -17,11 +17,12 @@ A premium-styled Flask starter for managing user-uploaded Python, JavaScript and
 - Admin dashboard shows bot counts, pending reviews, approved purchase totals, and per-user approved purchase amounts. The user's dashboard shows their own bots, payment requests, and approved purchase total.
 - This is a manual UPI/UTR flow: submitting a UTR creates a pending request. An admin must verify the payment and approve it; this starter does not automatically verify bank transfers.
 
-## Per-bot web terminal
-- A **Terminal** button is available in the user's bot table and the admin review table. It only opens a bot the signed-in user owns, unless the viewer is an admin.
-- The mobile-friendly terminal runs in the selected bot's runtime/project folder and supports `help`, `pwd`, `ls`, `cat <relative-file>`, `python --version`, `node --version`, `pip list`, `python -m py_compile <file.py>`, and `node --check <file.js>`.
-- For safety, it does not provide an unrestricted Linux shell, arbitrary system commands, shell operators, package installation, or paths outside the selected bot project. Commands have short timeouts and output limits. The bot must have been started at least once so its runtime folder exists.
-- This is a restricted convenience terminal, not a security sandbox. This starter runs uploaded bot code in the same host environment; do not expose it to untrusted public users without moving bot execution into isolated containers with CPU/memory/process limits.
+## Termux-style per-bot web terminal
+- A floating **Terminal** shortcut appears in the lower corner on the dashboard (it opens the first listed bot); each bot row also has its own Terminal button. Users can only access their own bots; admins can access any bot.
+- The terminal uses a dark, mobile-friendly Termux-inspired interface. Enter a command and press Enter/➜; each command runs separately, then you can type the next command. Output is added to terminal history without reloading the page.
+- Supported commands include `help`, `pwd`, `ls [relative-path]`, `cat <file>`, `python --version`, `python <file.py> [args...]`, `python -m py_compile <file.py>`, `pip list`, `node --version`, `node <file.js> [args...]`, `node --check <file.js>`, `npm --version`, and `npm list`. Script runs have a 20-second limit. The **Live logs** tab refreshes the selected bot's process logs every 2 seconds.
+- This is a restricted project terminal, not a full Linux/Termux shell: arbitrary shell commands, shell operators, package installation, network/system administration commands and paths outside the project are disabled on this shared host. The terminal does not attach to the bot's existing process stdin; use the bot process logs for live stdout/stderr. Package installation happens during bot setup from its `requirements.txt` or `package.json`.
+- The bot must have been started at least once so its runtime folder exists. This is not a security sandbox; uploaded bot code still runs in the shared host environment. Do not expose untrusted code publicly without isolated containers, resource limits and security testing.
 
 ## Login persistence and health ping
 - Successful login creates a permanent Flask session cookie that lasts up to 365 days and refreshes as the user visits the site. It ends when the user signs out, clears browser cookies, or the cookie expires. Keep Render's generated SECRET_KEY stable between deploys; changing it invalidates existing sessions.
