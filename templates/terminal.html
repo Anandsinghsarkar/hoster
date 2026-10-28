@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block content %}
+<div class="page-heading"><div><div class="eyebrow">BOT WORKSPACE / TERMINAL</div><h1>Web terminal<span>.</span></h1><p>{{ bot['name'] }} · {{ bot['filename'] }}</p></div><a class="btn btn-outline" href="/dashboard#my-bots">← My Bots</a></div>
+<section class="panel" style="margin-bottom:16px">
+  <div class="panel-title"><div><div class="eyebrow">PROJECT SCOPE</div><h2>Restricted terminal</h2></div><span class="status-badge {{ bot['status'] }}">{{ bot['status'] }}</span></div>
+  <p class="muted" style="line-height:1.65">Commands run with this bot's project directory as the working folder. For safety, this terminal only supports the listed commands; arbitrary shell commands, package installs, network tools and paths outside the project are disabled.</p>
+  {% if not runtime_ready %}<p class="flash warning">Runtime folder is not ready yet. Start or restart an approved bot, then return here.</p>{% else %}<p class="muted">Project path: <code>{{ project_root }}</code></p>{% endif %}
+</section>
+<section class="panel terminal-panel">
+  <div class="panel-title"><div><div class="eyebrow">COMMAND CONSOLE</div><h2>Terminal</h2></div><button class="tiny-btn" type="button" onclick="document.getElementById('terminal-output').textContent='';">Clear output</button></div>
+  <div class="terminal-window">
+    <div class="terminal-bar"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span><span>cyberhost · bot terminal</span></div>
+    <pre id="terminal-output" class="terminal-output">{% if output %}{{ output }}{% else %}Welcome to the bot terminal. Type help to view available commands.{% endif %}</pre>
+    <form method="post" class="terminal-form" autocomplete="off">
+      <label for="command" class="terminal-prompt">user@bot:~$</label>
+      <input id="command" name="command" value="{{ command }}" placeholder="help" maxlength="500" autocapitalize="off" spellcheck="false" required>
+      <button type="submit" class="btn btn-primary" {% if not runtime_ready %}disabled{% endif %}>Run ↵</button>
+    </form>
+  </div>
+  <div class="terminal-help"><b>Quick commands</b>
+    <div class="terminal-shortcuts">
+      {% for cmd in ['help','pwd','ls','python --version','node --version','pip list'] %}
+      <button type="button" class="tiny-btn" onclick="document.getElementById('command').value={{ cmd|tojson }};document.getElementById('command').focus()">{{ cmd }}</button>
+      {% endfor %}
+    </div>
+    <p class="muted">File commands: <code>ls [relative-path]</code>, <code>cat filename.py</code>, <code>python -m py_compile filename.py</code>, <code>node --check filename.js</code>.</p>
+  </div>
+</section>
+<style>
+.terminal-panel{overflow:hidden}.terminal-window{border:1px solid #263449;border-radius:14px;overflow:hidden;background:#070b12;color:#e6edf7}.terminal-bar{display:flex;align-items:center;gap:7px;padding:12px 14px;background:#111827;border-bottom:1px solid #263449;font-size:12px;color:#9aa9bf}.terminal-dot{width:9px;height:9px;border-radius:50%;background:#5d6c83}.terminal-bar span:last-child{margin-left:7px}.terminal-output{box-sizing:border-box;min-height:190px;max-height:55vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:16px;color:#d7f7df;font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}.terminal-form{display:flex;align-items:center;gap:10px;padding:12px;border-top:1px solid #263449;flex-wrap:wrap}.terminal-prompt{color:#72e6a1;font:12px ui-monospace,monospace;white-space:nowrap}.terminal-form input{flex:1;min-width:100px;background:#0d1420;border:1px solid #2a394d;border-radius:8px;padding:12px;color:#fff;font:14px ui-monospace,monospace;outline:none}.terminal-form input:focus{border-color:#729aff}.terminal-help{padding-top:16px}.terminal-shortcuts{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.terminal-shortcuts button{background:#172337;color:#dbe6f8;border:1px solid #34445d}.terminal-help code,.terminal-panel code{overflow-wrap:anywhere}@media(max-width:600px){.page-heading{align-items:flex-start;gap:12px}.terminal-form{align-items:stretch}.terminal-prompt{width:100%}.terminal-form input{width:100%;flex-basis:100%}.terminal-form button{width:100%}.terminal-output{font-size:12px;padding:12px;min-height:160px}}
+</style>
+{% endblock %}
