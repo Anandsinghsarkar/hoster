@@ -827,6 +827,37 @@ def _terminal_project_root(bot_id):
         return runtime
     return runtime
 
+def _prepare_terminal_workspace(bot):
+    """Prepare a bot's project files for terminal use even before the bot is started."""
+    bot_id = bot["id"]
+    runtime = RUNTIMES / str(bot_id)
+    if runtime.exists() and any(runtime.iterdir()):
+        return _terminal_project_root(bot_id)
+    source = UPLOADS / bot["filename"]
+    if not source.is_file() and _storage_enabled():
+        _storage_download_file("uploads/" + bot["filename"], source)
+    if not source.is_file():
+        return None
+    runtime.mkdir(parents=True, exist_ok=True)
+    if source.suffix.lower() == ".zip":
+        with zipfile.ZipFile(source) as archive:
+            members = archive.infolist()
+            if sum(info.file_size for info in members) > 100 * 1024 * 1024:
+                raise ValueError("ZIP expands to over 100 MB; reduce the project size and upload again.")
+            root_resolved = runtime.resolve()
+            for info in members:
+                target = (runtime / info.filename).resolve()
+                if target != root_resolved and root_resolved not in target.parents:
+                    raise ValueError("Unsafe path in ZIP archive.")
+                if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise ValueError("Symlinks are not allowed in ZIP uploads.")
+            archive.extractall(runtime)
+    elif source.suffix.lower() in (".py", ".js"):
+        shutil.copy2(source, runtime / source.name)
+    else:
+        return None
+    return _terminal_project_root(bot_id)
+
 def _terminal_safe_path(root, raw_name):
     candidate = (root / raw_name).resolve()
     if candidate != root and root not in candidate.parents:
@@ -970,6 +1001,11 @@ def _terminal_authorized_bot(bot_id):
 def bot_terminal(bot_id):
     u, bot = _terminal_authorized_bot(bot_id)
     root = _terminal_project_root(bot_id)
+    if not root:
+        try:
+            root = _prepare_terminal_workspace(bot)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            _write_log(bot_id, "[terminal] Workspace preparation failed: " + str(exc))
     if request.method == "POST":
         payload = request.get_json(silent=True) if request.is_json else None
         form = payload if payload is not None else request.form
