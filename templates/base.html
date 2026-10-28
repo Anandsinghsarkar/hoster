@@ -14,6 +14,8 @@
 <a class="floating-terminal" href="/bot/{{ bot['id'] }}/terminal" aria-label="Open bot terminal"><span>›_</span><b>Terminal</b></a>
 {% elif bots is defined and bots %}
 <a class="floating-terminal" href="/bot/{{ bots[0]['id'] }}/terminal" aria-label="Open first bot terminal"><span>›_</span><b>Terminal</b></a>
+{% else %}
+<a class="floating-terminal" href="/dashboard#my-bots" aria-label="Open terminal or choose a bot"><span>›_</span><b>Terminal</b></a>
 {% endif %}
 {% endif %}
 {% if current_user %}
