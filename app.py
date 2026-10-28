@@ -789,6 +789,123 @@ def run_bot(bot):
         with db() as c:
             c.execute("UPDATE bots SET status='error',last_error=? WHERE id=?", (message[:500], bot_id))
 
+def _terminal_project_root(bot_id):
+    runtime = (RUNTIMES / str(bot_id)).resolve()
+    if not runtime.exists() or not runtime.is_dir():
+        return None
+    try:
+        dirs = [p for p in runtime.iterdir() if p.is_dir()]
+        files = [p for p in runtime.iterdir() if p.is_file()]
+        if len(dirs) == 1 and not files:
+            return dirs[0].resolve()
+    except OSError:
+        return runtime
+    return runtime
+
+def _terminal_safe_file(root, raw_name):
+    candidate = (root / raw_name).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise ValueError("Path must stay inside this bot's project directory.")
+    if not candidate.is_file():
+        raise ValueError("File not found. Use ls to see project files.")
+    if candidate.stat().st_size > 256 * 1024:
+        raise ValueError("File is larger than the 256 KB terminal-view limit.")
+    return candidate
+
+@app.route("/bot/<int:bot_id>/terminal", methods=["GET", "POST"])
+@login_required
+def bot_terminal(bot_id):
+    u = get_user()
+    with db() as c:
+        bot = c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'", (bot_id,)).fetchone()
+    if not bot or (bot["user_id"] != u["id"] and not u["is_admin"]):
+        abort(404)
+    output = ""
+    command = ""
+    root = _terminal_project_root(bot_id)
+    if request.method == "POST":
+        command = request.form.get("command", "").strip()[:500]
+        if not command:
+            output = "Enter a command. Type help to see supported commands."
+        elif not root:
+            output = "Project files are not available yet. Start/restart the approved bot first so its runtime folder is prepared."
+        else:
+            try:
+                import shlex
+                parts = shlex.split(command)
+                if not parts:
+                    output = ""
+                elif parts[0] in ("help", "help()"):
+                    output = (
+                        "Supported commands (bot-folder scope only):\\n"
+                        "  help                         Show this list\\n"
+                        "  pwd                          Show project directory\\n"
+                        "  ls [relative-path]           List project files\\n"
+                        "  cat <relative-file>          View a small text file\\n"
+                        "  python --version             Show Python version\\n"
+                        "  node --version               Show Node.js version\\n"
+                        "  pip list                     List installed Python packages\\n"
+                        "  python -m py_compile <file>  Check Python syntax\\n"
+                        "  node --check <file>          Check JavaScript syntax\\n"
+                        "Shell operators and paths outside the project are disabled."
+                    )
+                elif parts == ["pwd"]:
+                    output = str(root)
+                elif parts[0] == "ls" and len(parts) <= 2:
+                    target = (root / (parts[1] if len(parts) == 2 else ".")).resolve()
+                    if target != root and root not in target.parents:
+                        raise ValueError("Path must stay inside this bot's project directory.")
+                    if not target.exists() or not target.is_dir():
+                        raise ValueError("Directory not found.")
+                    rows = []
+                    for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))[:200]:
+                        rows.append(("DIR  " if item.is_dir() else "FILE ") + item.name + ("/" if item.is_dir() else ""))
+                    output = "\\n".join(rows) if rows else "(empty directory)"
+                elif parts[0] == "cat" and len(parts) == 2:
+                    target = _terminal_safe_file(root, parts[1])
+                    output = target.read_text(encoding="utf-8", errors="replace")[:20000]
+                elif parts == ["python", "--version"]:
+                    result = subprocess.run([sys.executable, "--version"], cwd=str(root), capture_output=True, text=True, timeout=5)
+                    output = (result.stdout + result.stderr).strip()
+                elif parts == ["node", "--version"]:
+                    node = shutil.which("node")
+                    if not node:
+                        output = "Node.js is not installed in this runtime."
+                    else:
+                        result = subprocess.run([node, "--version"], cwd=str(root), capture_output=True, text=True, timeout=5)
+                        output = (result.stdout + result.stderr).strip()
+                elif parts == ["pip", "list"]:
+                    result = subprocess.run([sys.executable, "-m", "pip", "list", "--format=columns"],
+                                            cwd=str(root), capture_output=True, text=True, timeout=8)
+                    output = (result.stdout + result.stderr).strip()[-20000:]
+                elif len(parts) == 4 and parts[:3] == ["python", "-m", "py_compile"]:
+                    target = _terminal_safe_file(root, parts[3])
+                    if target.suffix.lower() != ".py":
+                        raise ValueError("py_compile only accepts a .py file.")
+                    result = subprocess.run([sys.executable, "-m", "py_compile", str(target)],
+                                            cwd=str(root), capture_output=True, text=True, timeout=8)
+                    output = (result.stdout + result.stderr).strip() or ("Python syntax OK." if result.returncode == 0 else f"Exited with code {result.returncode}.")
+                elif len(parts) == 3 and parts[:2] == ["node", "--check"]:
+                    target = _terminal_safe_file(root, parts[2])
+                    if target.suffix.lower() not in (".js", ".mjs", ".cjs"):
+                        raise ValueError("node --check only accepts a JavaScript file.")
+                    node = shutil.which("node")
+                    if not node:
+                        output = "Node.js is not installed in this runtime."
+                    else:
+                        result = subprocess.run([node, "--check", str(target)], cwd=str(root), capture_output=True, text=True, timeout=8)
+                        output = (result.stdout + result.stderr).strip() or ("JavaScript syntax OK." if result.returncode == 0 else f"Exited with code {result.returncode}.")
+                else:
+                    output = "Command not allowed. Type help to see supported commands."
+            except subprocess.TimeoutExpired:
+                output = "Command timed out. Terminal commands have a short time limit."
+            except (ValueError, OSError) as exc:
+                output = str(exc)
+        output = output or "(command completed with no output)"
+        output = output[-20000:]
+    return render_template("terminal.html", bot=bot, command=command, output=output,
+                           runtime_ready=bool(root), project_root=str(root) if root else "")
+
 @app.get("/bot/<int:bot_id>/logs")
 @login_required
 def bot_logs(bot_id):
