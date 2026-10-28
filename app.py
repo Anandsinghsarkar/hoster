@@ -630,17 +630,58 @@ def _detect_python_packages(entry):
     stdlib = getattr(sys, "stdlib_module_names", set())
     return sorted({module_to_package[m] for m in modules if m in module_to_package and m not in stdlib})
 
-def _run_setup_command(command, cwd, env, log, label, timeout=240):
-    log.write(f"[setup] {label}: {' '.join(command)}\n")
-    log.flush()
-    result = subprocess.run(
-        command, cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT,
-        env=env, timeout=timeout, check=False
+def _run_setup_command(command, cwd, env, log, label, timeout=360):
+    """Run dependency setup with explicit diagnostics and one conservative pip retry."""
+    base_command = list(command)
+    is_pip_install = (
+        len(base_command) >= 3
+        and Path(base_command[0]).name.startswith("python")
+        and base_command[1:3] == ["-m", "pip"]
+        and "install" in base_command
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"{label} failed with exit code {result.returncode}. Scroll/copy the log for details.")
-    log.write(f"[setup] {label} completed successfully.\n")
-    log.flush()
+    attempts = 2 if is_pip_install else 1
+    last_code = None
+    for attempt in range(1, attempts + 1):
+        run_command = list(base_command)
+        if is_pip_install:
+            # Avoid filling the small ephemeral container with pip's download cache
+            # and bytecode compilation; prefer prebuilt wheels where available.
+            additions = ["--no-cache-dir", "--prefer-binary", "--no-compile"]
+            for option in additions:
+                if option not in run_command:
+                    run_command.insert(3, option)
+        log.write(f"[setup] {label} (attempt {attempt}/{attempts}): {' '.join(run_command)}\n")
+        log.flush()
+        run_env = os.environ.copy()
+        run_env.update(env or {})
+        if is_pip_install:
+            run_env["PIP_NO_CACHE_DIR"] = "1"
+            run_env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+        try:
+            result = subprocess.run(
+                run_command, cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT,
+                env=run_env, timeout=timeout, check=False
+            )
+            last_code = result.returncode
+        except subprocess.TimeoutExpired:
+            log.write(f"[setup] {label} timed out after {timeout} seconds on attempt {attempt}.\n")
+            log.flush()
+            last_code = "timeout"
+        if last_code == 0:
+            log.write(f"[setup] {label} completed successfully.\n")
+            log.flush()
+            return
+        log.write(f"[setup] {label} failed on attempt {attempt} (exit={last_code}).\n")
+        log.flush()
+        if attempt < attempts:
+            log.write("[setup] Retrying dependency installation once without pip cache/bytecode compilation.\n")
+            log.flush()
+    details = _recent_log_excerpt_from_handle(log) if False else ""
+    raise RuntimeError(
+        f"{label} failed after {attempts} attempt(s) (exit={last_code}). "
+        "Open Live logs and check the final pip ERROR lines; common causes are an invalid "
+        "package/version, incompatible Python version, or the host running out of memory."
+    )
 
 def run_bot(bot):
     bot_id = bot["id"]
