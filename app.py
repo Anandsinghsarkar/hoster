@@ -4,6 +4,8 @@ from pathlib import Path
 from functools import wraps
 from flask import Flask, request, redirect, url_for, session, flash, render_template, abort, Response
 from werkzeug.utils import secure_filename
+from contextlib import contextmanager
+from urllib.parse import quote
 from werkzeug.security import generate_password_hash, check_password_hash
 
 BASE = Path(__file__).resolve().parent
@@ -64,10 +66,118 @@ ALLOWED = {".py", ".js", ".zip"}
 processes = {}
 process_lock = threading.Lock()
 
+# Supabase Storage persistence. The bucket must be PRIVATE. The SQLite database
+# is stored as a single object for this single-instance starter; do not run
+# multiple web instances against this snapshot-based database.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "").strip()
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "bot-files").strip()
+_storage_db_lock = threading.RLock()
+_db_sync_lock = threading.Lock()
+
+def _storage_enabled():
+    return bool(SUPABASE_URL and SUPABASE_SERVICE_KEY and SUPABASE_STORAGE_BUCKET)
+
+def _storage_url(object_path):
+    bucket = quote(SUPABASE_STORAGE_BUCKET, safe="")
+    path = quote(object_path.lstrip("/"), safe="/")
+    return f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
+
+def _storage_request(method, object_path, data=None, content_type="application/octet-stream"):
+    if not _storage_enabled():
+        return None
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
+        "Content-Type": content_type,
+        "Cache-Control": "no-cache",
+    }
+    if method == "POST":
+        headers["x-upsert"] = "true"
+    req = urllib.request.Request(_storage_url(object_path), data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=45) as response:
+            return response.read()
+    except Exception as exc:
+        # A 404 while restoring a not-yet-uploaded object is normal; callers
+        # decide whether a missing object is fatal.
+        try:
+            sys.stderr.write(f"[supabase-storage] {method} {object_path} failed: {type(exc).__name__}: {exc}\\n")
+        except Exception:
+            pass
+        return None
+
+def _storage_upload_bytes(object_path, data, content_type="application/octet-stream"):
+    if not _storage_enabled():
+        return False
+    return _storage_request("POST", object_path, data=data, content_type=content_type) is not None
+
+def _storage_upload_file(local_path, object_path):
+    try:
+        with open(local_path, "rb") as handle:
+            data = handle.read()
+        return _storage_upload_bytes(object_path, data)
+    except OSError as exc:
+        sys.stderr.write(f"[supabase-storage] read failed: {exc}\\n")
+        return False
+
+def _storage_download_file(object_path, local_path):
+    if not _storage_enabled():
+        return False
+    data = _storage_request("GET", object_path)
+    if data is None:
+        return False
+    destination = Path(local_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".download")
+    try:
+        temporary.write_bytes(data)
+        temporary.replace(destination)
+        return True
+    except OSError as exc:
+        sys.stderr.write(f"[supabase-storage] save failed: {exc}\\n")
+        temporary.unlink(missing_ok=True)
+        return False
+
+def _storage_delete(object_path):
+    if not _storage_enabled():
+        return False
+    # Supabase Storage's DELETE response can be empty; a non-None byte string
+    # (including b"") means the HTTP request succeeded.
+    return _storage_request("DELETE", object_path) is not None
+
+def _restore_database_snapshot():
+    if _storage_enabled() and not DB.exists():
+        _storage_download_file("_system/hosting.db", DB)
+
+# Restore the last database snapshot before creating tables or serving requests.
+_restore_database_snapshot()
+
+@contextmanager
 def db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # A process-local lock prevents two requests in this single web instance
+    # from uploading competing snapshots at the same time.
+    with _storage_db_lock:
+        conn = sqlite3.connect(DB, timeout=30)
+        conn.row_factory = sqlite3.Row
+        before = conn.total_changes
+        changed = False
+        try:
+            yield conn
+            conn.commit()
+            changed = conn.total_changes > before
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+            if changed and _storage_enabled():
+                # Synchronous snapshot makes successful writes durable before
+                # the request returns. Supabase failures are logged; local app
+                # operations continue, so check Render logs for storage errors.
+                with _db_sync_lock:
+                    if not _storage_upload_file(DB, "_system/hosting.db"):
+                        sys.stderr.write("[supabase-storage] database snapshot sync failed; latest changes may not survive a restart.\\n")
 
 def init_db():
     with db() as c:
@@ -317,6 +427,8 @@ def api_bot_delete(bot_id):
     shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
     try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
     except OSError: pass
+    if _storage_enabled():
+        _storage_delete("uploads/" + bot["filename"])
     return Response(json.dumps({"ok": True, "deleted_bot_id": bot_id}), mimetype="application/json")
 
 @app.get("/api/v1/payments")
@@ -426,10 +538,21 @@ def upload():
         return redirect(url_for("dashboard"))
     token = secrets.token_hex(6)
     stored = f"{u['id']}_{token}_{safe}"
-    f.save(UPLOADS / stored)
-    with db() as c:
-        c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,'pending')",
-                  (u["id"], name[:80], stored))
+    local_upload = UPLOADS / stored
+    f.save(local_upload)
+    if _storage_enabled() and not _storage_upload_file(local_upload, "uploads/" + stored):
+        local_upload.unlink(missing_ok=True)
+        flash("Supabase Storage upload failed. Check SUPABASE_URL, SUPABASE_SERVICE_KEY and the private bot-files bucket.", "danger")
+        return redirect(url_for("dashboard"))
+    try:
+        with db() as c:
+            c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,'pending')",
+                      (u["id"], name[:80], stored))
+    except Exception:
+        local_upload.unlink(missing_ok=True)
+        if _storage_enabled():
+            _storage_delete("uploads/" + stored)
+        raise
     flash("Upload received. It is pending admin review before it can run.", "success")
     return redirect(url_for("dashboard"))
 
@@ -496,6 +619,9 @@ def _run_setup_command(command, cwd, env, log, label, timeout=240):
 def run_bot(bot):
     bot_id = bot["id"]
     source = UPLOADS / bot["filename"]
+    # Rehydrate the original upload from durable storage after a Render restart.
+    if not source.is_file() and _storage_enabled():
+        _storage_download_file("uploads/" + bot["filename"], source)
     runtime = RUNTIMES / str(bot_id)
     # Start from a clean project folder so a previous failed setup cannot leave
     # stale dependencies or entry files behind.
@@ -696,6 +822,8 @@ def bot_action(bot_id, action):
         shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
         try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
         except Exception: pass
+        if _storage_enabled():
+            _storage_delete("uploads/" + bot["filename"])
         flash("Bot and its stored files were deleted.", "success")
     elif action == "stop":
         stop_process(bot_id)
@@ -864,8 +992,23 @@ def not_found(e): return render_template("error.html", code=404, message="Page n
 @app.errorhandler(413)
 def too_large(e): return render_template("error.html", code=413, message="Upload too large. Maximum upload size is 25 MB."), 413
 
-# Start the optional ping loop in both Gunicorn and local development.
+def _restore_approved_bots():
+    """Re-download files and relaunch bots whose persisted state says approved/running."""
+    try:
+        with db() as c:
+            rows = c.execute("SELECT * FROM bots WHERE status IN ('approved','running') ORDER BY id").fetchall()
+            # The old OS processes died with the Render instance. Mark them as
+            # approved before launching fresh processes in this instance.
+            c.execute("UPDATE bots SET status='approved' WHERE status='running'")
+        for row in rows:
+            threading.Thread(target=run_bot, args=(row,), name=f"restore-bot-{row['id']}", daemon=True).start()
+    except Exception as exc:
+        sys.stderr.write(f"[restore] could not restore bots: {type(exc).__name__}: {exc}\\n")
+
+# Start the optional ping loop and persisted bot recovery.
 _start_keep_alive()
+if _storage_enabled():
+    threading.Thread(target=_restore_approved_bots, name="restore-approved-bots", daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
