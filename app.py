@@ -210,7 +210,8 @@ def init_db():
             c.executemany("INSERT INTO plans(name,price,credits,bot_limit,days) VALUES(?,?,?,?,?)", [
                 ("Starter", 30, 10, 2, 30), ("Pro", 99, 40, 10, 30), ("Power", 199, 100, 25, 90)])
         defaults = {"site_name":"CYBER HOST", "support_text":"Contact support through your official support channel.",
-                    "upi_id":"your-upi@bank", "payment_qr_url":"", "maintenance":"0"}
+                    "upi_id":"your-upi@bank", "payment_qr_url":"", "payment_qr_storage_path":"",
+                    "payment_qr_content_type":"image/png", "payment_qr_filename":"", "maintenance":"0"}
         for k,v in defaults.items(): c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",(k,v))
 init_db()
 
@@ -223,6 +224,8 @@ def setting(key):
 def inject_globals():
     return {"site_name": setting("site_name"), "support_text": setting("support_text"),
             "current_user": get_user(), "maintenance": setting("maintenance") == "1",
+            "payment_qr_url": setting("payment_qr_url"), "payment_upi_id": setting("upi_id"),
+            "payment_qr_filename": setting("payment_qr_filename"),
             "session_days": 365, "keep_alive_enabled": _keep_alive_base_url() is not None,
             "keep_alive_interval": _keep_alive_interval_minutes()}
 
@@ -518,8 +521,10 @@ def dashboard():
     with db() as c:
         bots = c.execute("SELECT * FROM bots WHERE user_id=? AND status!='deleted' ORDER BY id DESC",(u["id"],)).fetchall()
         plans = c.execute("SELECT * FROM plans WHERE active=1 ORDER BY price",( )).fetchall()
-        payments = c.execute("SELECT payments.*, plans.name plan_name FROM payments JOIN plans ON plans.id=payments.plan_id WHERE user_id=? ORDER BY payments.id DESC",(u["id"],)).fetchall()
-    return render_template("dashboard.html", bots=bots, plans=plans, payments=payments, user=u, bot_limit=10**6 if u["is_admin"] else 2)
+        payments = c.execute("SELECT payments.*, plans.name plan_name, plans.price plan_price, plans.credits plan_credits FROM payments JOIN plans ON plans.id=payments.plan_id WHERE user_id=? ORDER BY payments.id DESC",(u["id"],)).fetchall()
+        purchase_summary = c.execute("SELECT COUNT(*) count, COALESCE(SUM(plans.price),0) total FROM payments JOIN plans ON plans.id=payments.plan_id WHERE payments.user_id=? AND payments.status='approved'", (u["id"],)).fetchone()
+    return render_template("dashboard.html", bots=bots, plans=plans, payments=payments, user=u,
+                           purchase_summary=purchase_summary, bot_limit=10**6 if u["is_admin"] else 2)
 
 @app.post("/upload")
 @login_required
@@ -544,16 +549,23 @@ def upload():
         local_upload.unlink(missing_ok=True)
         flash("Supabase Storage upload failed. Check SUPABASE_URL, SUPABASE_SERVICE_KEY and the private bot-files bucket.", "danger")
         return redirect(url_for("dashboard"))
+    initial_status = "approved" if u["is_admin"] else "pending"
     try:
         with db() as c:
-            c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,'pending')",
-                      (u["id"], name[:80], stored))
+            c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,?)",
+                      (u["id"], name[:80], stored, initial_status))
     except Exception:
         local_upload.unlink(missing_ok=True)
         if _storage_enabled():
             _storage_delete("uploads/" + stored)
         raise
-    flash("Upload received. It is pending admin review before it can run.", "success")
+    if u["is_admin"]:
+        with db() as c:
+            created_bot = c.execute("SELECT * FROM bots WHERE filename=?", (stored,)).fetchone()
+        threading.Thread(target=run_bot, args=(created_bot,), name=f"admin-bot-{created_bot['id']}", daemon=True).start()
+        flash("Admin upload approved automatically; launch requested.", "success")
+    else:
+        flash("Upload received. It is pending admin review before it can run.", "success")
     return redirect(url_for("dashboard"))
 
 def _write_log(bot_id, message):
@@ -847,13 +859,21 @@ def admin():
     with db() as c:
         users = c.execute("SELECT id,username,is_admin,credits,created_at FROM users ORDER BY id DESC").fetchall()
         bots = c.execute("SELECT bots.*,users.username FROM bots JOIN users ON users.id=bots.user_id WHERE status!='deleted' ORDER BY bots.id DESC").fetchall()
-        payments = c.execute("SELECT payments.*,users.username,plans.name plan_name FROM payments JOIN users ON users.id=payments.user_id JOIN plans ON plans.id=payments.plan_id ORDER BY payments.id DESC").fetchall()
+        payments = c.execute("SELECT payments.*,users.username,plans.name plan_name,plans.price plan_price,plans.credits plan_credits FROM payments JOIN users ON users.id=payments.user_id JOIN plans ON plans.id=payments.plan_id ORDER BY payments.id DESC").fetchall()
         plans = c.execute("SELECT * FROM plans ORDER BY price").fetchall()
+        overview = {
+            "users": c.execute("SELECT COUNT(*) n FROM users WHERE is_admin=0").fetchone()["n"],
+            "bots": c.execute("SELECT COUNT(*) n FROM bots WHERE status!='deleted'").fetchone()["n"],
+            "running": c.execute("SELECT COUNT(*) n FROM bots WHERE status='running'").fetchone()["n"],
+            "pending_bots": c.execute("SELECT COUNT(*) n FROM bots WHERE status='pending'").fetchone()["n"],
+            "pending_payments": c.execute("SELECT COUNT(*) n FROM payments WHERE status='pending'").fetchone()["n"],
+            "revenue": c.execute("SELECT COALESCE(SUM(plans.price),0) total FROM payments JOIN plans ON plans.id=payments.plan_id WHERE payments.status='approved'").fetchone()["total"]
+        }
         settings = {r["key"]:r["value"] for r in c.execute("SELECT * FROM settings").fetchall()}
         api_tokens = c.execute("SELECT id,name,token_prefix,scopes,created_at,expires_at,last_used_at,revoked_at FROM api_tokens ORDER BY id DESC").fetchall()
     new_api_token = session.pop("new_api_token", None)
     return render_template("admin.html", users=users, bots=bots, payments=payments, plans=plans, settings=settings,
-                           api_tokens=api_tokens, api_scopes=API_SCOPES, new_api_token=new_api_token)
+                           overview=overview, api_tokens=api_tokens, api_scopes=API_SCOPES, new_api_token=new_api_token)
 
 @app.post("/admin/api-tokens")
 @admin_required
@@ -945,16 +965,80 @@ def buy():
         flash("Payment submitted for admin verification.", "success")
     return redirect(url_for("dashboard"))
 
+@app.get("/payment-qr")
+def payment_qr():
+    """Serve an uploaded QR from private Supabase Storage or local fallback."""
+    object_path = setting("payment_qr_storage_path")
+    content_type = setting("payment_qr_content_type") or "image/png"
+    if object_path and _storage_enabled():
+        data = _storage_request("GET", object_path)
+        if data is not None:
+            return Response(data, mimetype=content_type, headers={"Cache-Control":"private, max-age=300"})
+        return Response("Payment QR image is temporarily unavailable.", status=503, mimetype="text/plain")
+    local_name = setting("payment_qr_filename")
+    if local_name:
+        local_path = DATA / secure_filename(local_name)
+        if local_path.is_file():
+            return Response(local_path.read_bytes(), mimetype=content_type, headers={"Cache-Control":"private, max-age=300"})
+    abort(404)
+
 @app.post("/admin/settings")
 @admin_required
 def save_settings():
-    allowed = ["site_name","support_text","upi_id","payment_qr_url","maintenance"]
+    allowed = ["site_name","support_text","upi_id","maintenance"]
+    qr_file = request.files.get("payment_qr_file")
+    remove_qr = request.form.get("remove_payment_qr") == "1"
     with db() as c:
         for k in allowed:
             val = request.form.get(k, "").strip()
             if k == "maintenance": val = "1" if val == "1" else "0"
             c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(k,val[:2000]))
-    flash("Settings saved.", "success"); return redirect(url_for("admin"))
+
+    # An ordinary save or page refresh never clears the saved QR.
+    if qr_file and qr_file.filename:
+        original = secure_filename(qr_file.filename)
+        ext = Path(original).suffix.lower()
+        mime_by_ext = {".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".webp":"image/webp"}
+        if ext not in mime_by_ext:
+            flash("QR image must be PNG, JPG, JPEG, or WEBP.", "danger")
+            return redirect(url_for("admin") + "#settings")
+        data = qr_file.read()
+        if not data or len(data) > 5 * 1024 * 1024:
+            flash("Choose a valid QR image up to 5 MB.", "danger")
+            return redirect(url_for("admin") + "#settings")
+        object_path = "settings/payment-qr" + ext
+        content_type = mime_by_ext[ext]
+        local_name = "payment-qr" + ext
+        (DATA / local_name).write_bytes(data)
+        if _storage_enabled() and not _storage_upload_bytes(object_path, data, content_type):
+            flash("QR upload failed. Check Supabase Storage configuration and Render logs.", "danger")
+            return redirect(url_for("admin") + "#settings")
+        with db() as c:
+            c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_storage_path',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (object_path if _storage_enabled() else "",))
+            c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_content_type',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (content_type,))
+            c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_filename',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (local_name,))
+            c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_url','/payment-qr') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    elif remove_qr:
+        old_path = setting("payment_qr_storage_path")
+        if old_path and _storage_enabled():
+            _storage_delete(old_path)
+        old_local = setting("payment_qr_filename")
+        if old_local:
+            try: (DATA / secure_filename(old_local)).unlink(missing_ok=True)
+            except OSError: pass
+        with db() as c:
+            for key in ("payment_qr_url","payment_qr_storage_path","payment_qr_filename"):
+                c.execute("INSERT INTO settings(key,value) VALUES(?, '') ON CONFLICT(key) DO UPDATE SET value=''", (key,))
+    elif request.form.get("payment_qr_url", "").strip():
+        external_url = request.form.get("payment_qr_url", "").strip()[:1000]
+        if not external_url.startswith(("https://", "http://")):
+            flash("QR URL must start with https:// or http://.", "danger")
+            return redirect(url_for("admin") + "#settings")
+        with db() as c:
+            c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_url',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (external_url,))
+            c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_storage_path','') ON CONFLICT(key) DO UPDATE SET value=''")
+            c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_filename','') ON CONFLICT(key) DO UPDATE SET value=''")
+    flash("Settings saved.", "success"); return redirect(url_for("admin") + "#settings")
 
 @app.post("/admin/plan")
 @admin_required
