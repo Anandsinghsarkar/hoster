@@ -9,6 +9,14 @@ A premium-styled Flask starter for managing user-uploaded Python, JavaScript and
 4. Deploy. The app uses a 365-day persistent login cookie and configures a best-effort health ping every 10 minutes using Render's RENDER_EXTERNAL_URL. Open `/login` and sign in with the admin credentials.
 5. Change the UPI ID, QR URL, support text and site name in Admin.
 
+## Android/mobile navigation and payment QR
+- On phones, the signed-in site has a fixed bottom navigation bar: **Dashboard**, **My Bots**, **Create Bot**, and **Store**. Admins get **Dashboard**, **Bots**, **Payments**, and **Settings** buttons.
+- In Admin → Platform settings, enter a public HTTPS QR image URL **or** upload a PNG/JPG/JPEG/WEBP image up to 5 MB. The QR and UPI ID are displayed in the user's Store section. Saving other settings or refreshing the page does not clear the saved QR; use the explicit remove checkbox only when you want to delete it.
+- For restart-safe uploaded QR storage, configure the private Supabase Storage bucket `bot-files` and the three Supabase environment variables described below. The QR image is saved in that bucket at `settings/payment-qr.<extension>`; its setting is stored in the app database snapshot. Without Supabase, an uploaded QR is saved locally and may disappear when Render replaces its ephemeral instance.
+- Admin-uploaded bot files are marked approved and launch is requested automatically. Normal users' uploads remain **pending** until an admin inspects and approves/rejects them.
+- Admin dashboard shows bot counts, pending reviews, approved purchase totals, and per-user approved purchase amounts. The user's dashboard shows their own bots, payment requests, and approved purchase total.
+- This is a manual UPI/UTR flow: submitting a UTR creates a pending request. An admin must verify the payment and approve it; this starter does not automatically verify bank transfers.
+
 ## Login persistence and health ping
 - Successful login creates a permanent Flask session cookie that lasts up to 365 days and refreshes as the user visits the site. It ends when the user signs out, clears browser cookies, or the cookie expires. Keep Render's generated SECRET_KEY stable between deploys; changing it invalidates existing sessions.
 - The /health and /ping endpoints return a lightweight ok response for health checks. When KEEP_ALIVE_ENABLED=true and RENDER_EXTERNAL_URL is available, the app makes a best-effort request to its own health endpoint every 10 minutes. You can change the interval with KEEP_ALIVE_INTERVAL_MINUTES (supported range 5–14) or set KEEP_ALIVE_URL to the public base URL.
