@@ -584,7 +584,7 @@ def _recent_log_excerpt(bot_id, max_chars=1400):
             handle.seek(max(0, size - max_chars * 3))
             data = handle.read().decode("utf-8", errors="replace")
         lines = [line for line in data.splitlines() if line.strip()]
-        return "\\n".join(lines[-14:])[-max_chars:]
+        return "\n".join(lines[-14:])[-max_chars:]
     except OSError:
         return ""
 
