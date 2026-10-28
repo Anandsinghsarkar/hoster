@@ -647,9 +647,11 @@ def _run_setup_command(command, cwd, env, log, label, timeout=360):
             # Avoid filling the small ephemeral container with pip's download cache
             # and bytecode compilation; prefer prebuilt wheels where available.
             additions = ["--no-cache-dir", "--prefer-binary", "--no-compile"]
+            insert_at = run_command.index("install") + 1
             for option in additions:
                 if option not in run_command:
-                    run_command.insert(3, option)
+                    run_command.insert(insert_at, option)
+                    insert_at += 1
         log.write(f"[setup] {label} (attempt {attempt}/{attempts}): {' '.join(run_command)}\n")
         log.flush()
         run_env = os.environ.copy()
