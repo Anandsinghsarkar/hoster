@@ -837,16 +837,16 @@ def bot_terminal(bot_id):
                     output = ""
                 elif parts[0] in ("help", "help()"):
                     output = (
-                        "Supported commands (bot-folder scope only):\\n"
-                        "  help                         Show this list\\n"
-                        "  pwd                          Show project directory\\n"
-                        "  ls [relative-path]           List project files\\n"
-                        "  cat <relative-file>          View a small text file\\n"
-                        "  python --version             Show Python version\\n"
-                        "  node --version               Show Node.js version\\n"
-                        "  pip list                     List installed Python packages\\n"
-                        "  python -m py_compile <file>  Check Python syntax\\n"
-                        "  node --check <file>          Check JavaScript syntax\\n"
+                        "Supported commands (bot-folder scope only):\n"
+                        "  help                         Show this list\n"
+                        "  pwd                          Show project directory\n"
+                        "  ls [relative-path]           List project files\n"
+                        "  cat <relative-file>          View a small text file\n"
+                        "  python --version             Show Python version\n"
+                        "  node --version               Show Node.js version\n"
+                        "  pip list                     List installed Python packages\n"
+                        "  python -m py_compile <file>  Check Python syntax\n"
+                        "  node --check <file>          Check JavaScript syntax\n"
                         "Shell operators and paths outside the project are disabled."
                     )
                 elif parts == ["pwd"]:
@@ -860,7 +860,7 @@ def bot_terminal(bot_id):
                     rows = []
                     for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))[:200]:
                         rows.append(("DIR  " if item.is_dir() else "FILE ") + item.name + ("/" if item.is_dir() else ""))
-                    output = "\\n".join(rows) if rows else "(empty directory)"
+                    output = "\n".join(rows) if rows else "(empty directory)"
                 elif parts[0] == "cat" and len(parts) == 2:
                     target = _terminal_safe_file(root, parts[1])
                     output = target.read_text(encoding="utf-8", errors="replace")[:20000]
