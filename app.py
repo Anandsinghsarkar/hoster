@@ -857,7 +857,11 @@ def bot_action(bot_id, action):
 @admin_required
 def admin():
     with db() as c:
-        users = c.execute("SELECT id,username,is_admin,credits,created_at FROM users ORDER BY id DESC").fetchall()
+        users = c.execute("""SELECT users.id,users.username,users.is_admin,users.credits,users.created_at,
+            COALESCE((SELECT SUM(plans.price) FROM payments JOIN plans ON plans.id=payments.plan_id
+                      WHERE payments.user_id=users.id AND payments.status='approved'),0) purchased_total,
+            (SELECT COUNT(*) FROM payments WHERE payments.user_id=users.id AND payments.status='approved') purchase_count
+            FROM users ORDER BY users.id DESC""").fetchall()
         bots = c.execute("SELECT bots.*,users.username FROM bots JOIN users ON users.id=bots.user_id WHERE status!='deleted' ORDER BY bots.id DESC").fetchall()
         payments = c.execute("SELECT payments.*,users.username,plans.name plan_name,plans.price plan_price,plans.credits plan_credits FROM payments JOIN users ON users.id=payments.user_id JOIN plans ON plans.id=payments.plan_id ORDER BY payments.id DESC").fetchall()
         plans = c.execute("SELECT * FROM plans ORDER BY price").fetchall()
