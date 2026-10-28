@@ -25,7 +25,7 @@
     <div class="logs-foot">Auto-refreshes every 2 seconds · latest 48 KB</div>
   </section>
   <div class="term-quick"><span>QUICK COMMANDS</span><div>
-    {% for cmd in ['help','pwd','ls','python --version','pip list','node --version'] %}
+    {% for cmd in ['help','pwd','ls','python --version','pip list','pip install -r requirements.txt','node --version'] %}
     <button type="button" class="quick-command" data-command="{{ cmd }}">{{ cmd }}</button>
     {% endfor %}
   </div></div>
