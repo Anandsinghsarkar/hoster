@@ -3,7 +3,7 @@
 <link rel="stylesheet" href="{{ url_for('static',filename='style.css') }}"></head><body>
 <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
 <nav class="nav"><a class="brand" href="/"><span class="brand-mark">C</span><span>{{ site_name or 'CYBER HOST' }}<small>BOT CLOUD PLATFORM</small></span></a>
-<div class="nav-actions">{% if current_user %}<a href="/dashboard" class="nav-link">Dashboard</a>{% if current_user['is_admin'] %}<a href="/admin" class="nav-link">Admin</a>{% endif %}<a href="/logout" class="btn btn-outline btn-sm">Sign out</a>{% else %}<a href="/login" class="nav-link">Sign in</a><a href="/register" class="btn btn-primary btn-sm">Get started ↗</a>{% endif %}</div></nav>
+<div class="nav-actions">{% if current_user %}<a href="{{ '/admin' if current_user['is_admin'] else '/dashboard' }}" class="nav-link">Dashboard</a>{% if current_user['is_admin'] %}<a href="/admin/bots" class="nav-link">Bots</a>{% else %}<a href="/bots" class="nav-link">My Bots</a>{% endif %}<a href="/logout" class="btn btn-outline btn-sm">Sign out</a>{% else %}<a href="/login" class="nav-link">Sign in</a><a href="/register" class="btn btn-primary btn-sm">Get started ↗</a>{% endif %}</div></nav>
 <main class="container">
 {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category,message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
 {% block content %}{% endblock %}
@@ -21,12 +21,11 @@
 {% if current_user %}
 <nav class="mobile-bottom-nav" aria-label="Main navigation">
 {% if current_user['is_admin'] %}
-<a href="/admin#overview"><span>⌂</span><small>Dashboard</small></a><a href="/admin#bots"><span>▣</span><small>Bots</small></a><a href="/admin#payments"><span>₹</span><small>Payments</small></a><a href="/admin#settings"><span>⚙</span><small>Settings</small></a>
+<a href="/admin"><span>⌂</span><small>Home</small></a><a href="/admin/bots"><span>▣</span><small>Bots</small></a><a href="/admin/payments"><span>₹</span><small>Payments</small></a><a href="/admin/users"><span>♙</span><small>Users</small></a><a href="/admin/settings"><span>⚙</span><small>Settings</small></a>
 {% else %}
-<a href="/dashboard#dashboard-top"><span>⌂</span><small>Dashboard</small></a><a href="/dashboard#my-bots"><span>▣</span><small>My Bots</small></a><a href="/dashboard#create-bot"><span>＋</span><small>Create Bot</small></a><a href="/dashboard#store"><span>₹</span><small>Store</small></a>
+<a href="/dashboard"><span>⌂</span><small>Home</small></a><a href="/bots"><span>▣</span><small>My Bots</small></a><a href="/create"><span>＋</span><small>Create</small></a><a href="/store"><span>₹</span><small>Store</small></a><a href="/profile"><span>♙</span><small>Profile</small></a>
 {% endif %}
 </nav>
-{% endif %}
 <style>
 .floating-terminal{position:fixed;z-index:10000;right:22px;bottom:22px;display:flex;align-items:center;gap:9px;padding:13px 17px;border:1px solid #4e9364;border-radius:999px;background:linear-gradient(135deg,#123a22,#07150c);box-shadow:0 8px 30px #0007;color:#b8ffc7;text-decoration:none;font:600 12px ui-monospace,monospace;letter-spacing:.3px}
 .floating-terminal span{font-size:18px;color:#7dff9b}
@@ -42,5 +41,9 @@
  .container{padding-left:12px;padding-right:12px}.floating-terminal{right:12px;bottom:calc(88px + env(safe-area-inset-bottom));padding:11px 14px}
  .table-scroll{max-width:100%;overflow-x:auto}
 }
+
+.workspace-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 0;border-bottom:1px solid var(--line)}.workspace-row:last-child{border-bottom:0}.workspace-main{display:flex;flex-direction:column;gap:5px;min-width:0}.workspace-main small{color:var(--muted);overflow-wrap:anywhere}.workspace-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.narrow-panel{max-width:680px;margin:0 auto}.qr-image{display:block;width:min(260px,100%);max-height:320px;object-fit:contain;background:white;padding:8px;border-radius:12px}.profile-avatar{width:64px;height:64px;border-radius:20px;background:#292044;display:grid;place-items:center;font-size:28px;font-weight:800;color:#c7b5ff}.plan-edit{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}.plan-edit label{min-width:0}.plan-edit input{width:100%}.mobile-bottom-nav{grid-template-columns:repeat(5,minmax(0,1fr))!important}.mobile-bottom-nav a{min-height:48px}.mobile-bottom-nav a small{font-size:9px}
+@media(max-width:760px){.workspace-row{align-items:flex-start;flex-direction:column}.workspace-actions{justify-content:flex-start;width:100%}.workspace-actions .tiny-btn,.workspace-actions button{min-height:38px}.plan-edit{grid-template-columns:repeat(2,minmax(0,1fr))}.page-heading{align-items:flex-start;gap:12px;flex-direction:column}.panel{padding:16px!important;border-radius:16px!important}.form-grid{grid-template-columns:1fr!important}.store-grid{grid-template-columns:1fr!important}.credit-form{width:100%}.credit-form input{max-width:120px}.container{padding-left:12px!important;padding-right:12px!important}.mobile-bottom-nav{gap:1px;padding-left:3px;padding-right:3px}.mobile-bottom-nav a{padding:5px 0}.mobile-bottom-nav a span{font-size:19px}.floating-terminal{bottom:calc(78px + env(safe-area-inset-bottom))!important;right:10px!important}}
+@media(max-width:380px){.mobile-bottom-nav a small{font-size:8px}.plan-edit{grid-template-columns:1fr}}
 </style>
 </body></html>
