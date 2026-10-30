@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block content %}
+<header class="page-heading"><div><div class="eyebrow">SOURCE CONTROL // IMPORT</div><h1>GitHub Deploy<span>.</span></h1><p>Connect GitHub and import a repository directly into your hosting workspace.</p></div></header>
+<section class="panel narrow-panel">
+{% if not github_configured %}<div class="flash warning">GitHub OAuth is not configured. Add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in Render Environment.</div>
+{% elif connected %}<div class="github-connected"><span class="status-badge running">CONNECTED</span><h2>@{{ connected['github_login'] }}</h2><small>GitHub account ID: {{ connected['github_id'] }}</small></div><form method="post" action="/github/disconnect"><button class="btn btn-outline">Disconnect GitHub</button></form>
+{% else %}<h2>Connect your GitHub account</h2><p class="muted">GitHub handles authorization. Your access token is encrypted before being stored by this app.</p><a class="btn btn-primary full" href="/github/connect">Continue with GitHub ↗</a>{% endif %}
+</section>
+{% if connected and repositories %}<section class="panel"><h2>Select a repository</h2><p class="muted">Choose a project to import. The default branch is selected automatically.</p>
+{% for r in repositories %}<form method="post" action="/github/deploy" class="github-repo-row"><div class="workspace-main"><b>{{ r['full_name'] }}</b><small>{{ r.get('description') or 'No description' }} · {{ 'Private' if r['private'] else 'Public' }} · {{ r['default_branch'] }}</small></div><input type="hidden" name="repository" value="{{ r['full_name'] }}"><input type="hidden" name="branch" value="{{ r['default_branch'] }}"><input name="name" value="{{ r['name'] }}" maxlength="80" aria-label="Bot name"><button class="btn btn-primary btn-sm">Import & Deploy</button></form>{% endfor %}</section>
+{% elif connected %}<section class="panel"><p class="muted">No repositories were returned. Refresh the page or check repository permissions on GitHub.</p></section>{% endif %}
+<section class="panel"><h3>Deployment flow</h3><ol><li>Connect GitHub once.</li><li>Choose one accessible repository.</li><li>CYBER HOST downloads and validates its source archive.</li><li>Normal admin approval and bot launch rules apply.</li></ol><p class="muted">This imports a snapshot of the selected branch. It does not automatically redeploy on future Git pushes. Only import code you trust.</p></section>
+{% endblock %}
