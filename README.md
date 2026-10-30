@@ -117,6 +117,7 @@ The bottom navigation is fixed on mobile, with responsive layouts for cards, for
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Private server-side Supabase service key |
 | `SUPABASE_STORAGE_BUCKET` | Storage bucket name; use `bot-files` |\n| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID |\n| `GITHUB_CLIENT_SECRET` | GitHub OAuth App secret |\n| `GITHUB_CALLBACK_URL` | `https://YOUR-SERVICE.onrender.com/github/callback` |
+| Telegram admin bot | Configure securely from Admin → Telegram Admin Bot; no Render token variable needed |
 
 **Important:** If an existing Render service was created with a different runtime and cannot switch to Docker, create a new Web Service using this repository's Docker configuration.
 
@@ -160,7 +161,17 @@ Only import source code you trust: deployed Python/JavaScript projects execute i
 
 ---
 
-## `06 // BOT DEPLOYMENT WORKFLOW`
+## `06 // TELEGRAM ADMIN BOT`
+
+1. Sign in as the website administrator and open **Admin → Telegram Admin Bot**.
+2. Create a bot with Telegram's official BotFather and paste its token into the page.
+3. Open the newly created bot in a private Telegram chat, press Start, then send the one-time `/pair CODE` displayed by the website.
+4. Use `/menu` for the admin keyboard. It includes Bots, Payments, Users and Overview. Bot uploads are delivered as documents with approve/reject buttons. Pending payment requests also have approve/reject buttons. Use `/credit USER_ID AMOUNT` to adjust a user's credits (positive or negative).
+5. The bot remains connected until **Disconnect Bot** is pressed. The encrypted token and pairing state require persistent database storage and an unchanged `SECRET_KEY` across restarts.
+
+**Security:** Only the paired Telegram account ID and private chat ID are authorized. Never forward the bot token or pairing code. Telegram file delivery sends the uploaded source archive as-is; it is not a malware verdict or sandbox scan. Do not automatically execute untrusted uploads just because they were delivered to Telegram. Inspect code in a separate safe environment before approval. This polling integration is intended for a single app instance/worker; avoid running multiple Gunicorn workers or multiple Render instances with the same token.
+
+## `07 // BOT DEPLOYMENT WORKFLOW`
 
 1. Create an account and sign in.
 2. Open **Create Bot**.
@@ -304,7 +315,8 @@ Other important limitations:
 - Self-pinging is best-effort and cannot guarantee 24/7 uptime.
 - A bot that crashes because of invalid credentials, code errors or incompatible dependencies will not be automatically repaired by restarting it.
 - Manual UPI review is not automated payment verification.
-- This starter does not include Google OAuth, Telegram admin notifications or a live payment gateway.
+- Telegram admin bot is optional and requires a BotFather token plus a one-time private-chat pairing code. It sends login/register/logout, upload and payment alerts; source files are sent to the paired admin chat for manual review. Inline buttons can approve/reject bots and payments; user listing and credit adjustments are available. It does not run a reliable malware scanner, and source review must be performed by the admin.
+- This starter does not include Google OAuth or a live payment gateway.
 - Keep `SECRET_KEY`, `ADMIN_PASSWORD` and `SUPABASE_SERVICE_KEY` private.
 
 ---
