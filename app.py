@@ -526,6 +526,87 @@ def dashboard():
     return render_template("dashboard.html", bots=bots, plans=plans, payments=payments, user=u,
                            purchase_summary=purchase_summary, bot_limit=10**6 if u["is_admin"] else 2)
 
+
+@app.get("/bots")
+@login_required
+def my_bots():
+    u=get_user()
+    with db() as c: bots=c.execute("SELECT * FROM bots WHERE user_id=? AND status!='deleted' ORDER BY id DESC",(u["id"],)).fetchall()
+    return render_template("workspace.html", page="bots", bots=bots, user=u)
+
+@app.get("/create")
+@login_required
+def create_bot_page():
+    return render_template("workspace.html", page="create", user=get_user())
+
+@app.get("/store")
+@login_required
+def store_page():
+    u=get_user()
+    with db() as c:
+        plans=c.execute("SELECT * FROM plans WHERE active=1 ORDER BY price").fetchall()
+        payments=c.execute("SELECT payments.*,plans.name plan_name,plans.price plan_price FROM payments JOIN plans ON plans.id=payments.plan_id WHERE user_id=? ORDER BY payments.id DESC",(u["id"],)).fetchall()
+    return render_template("workspace.html", page="store", user=u, plans=plans, payments=payments)
+
+@app.get("/payments")
+@login_required
+def payments_page():
+    u=get_user()
+    with db() as c: payments=c.execute("SELECT payments.*,plans.name plan_name,plans.price plan_price FROM payments JOIN plans ON plans.id=payments.plan_id WHERE user_id=? ORDER BY payments.id DESC",(u["id"],)).fetchall()
+    return render_template("workspace.html", page="payments", user=u, payments=payments)
+
+@app.get("/profile")
+@login_required
+def profile_page():
+    u=get_user()
+    with db() as c: bot_total=c.execute("SELECT COUNT(*) n FROM bots WHERE user_id=? AND status!='deleted'",(u["id"],)).fetchone()["n"]
+    return render_template("workspace.html", page="profile", user=u, bot_total=bot_total)
+
+def _admin_page_data():
+    with db() as c:
+        users=c.execute("""SELECT users.id,users.username,users.is_admin,users.credits,users.created_at,
+          COALESCE((SELECT SUM(plans.price) FROM payments JOIN plans ON plans.id=payments.plan_id WHERE payments.user_id=users.id AND payments.status='approved'),0) purchased_total,
+          (SELECT COUNT(*) FROM payments WHERE payments.user_id=users.id AND payments.status='approved') purchase_count FROM users ORDER BY users.id DESC""").fetchall()
+        bots=c.execute("SELECT bots.*,users.username FROM bots JOIN users ON users.id=bots.user_id WHERE status!='deleted' ORDER BY bots.id DESC").fetchall()
+        payments=c.execute("SELECT payments.*,users.username,plans.name plan_name,plans.price plan_price,plans.credits plan_credits FROM payments JOIN users ON users.id=payments.user_id JOIN plans ON plans.id=payments.plan_id ORDER BY payments.id DESC").fetchall()
+        plans=c.execute("SELECT * FROM plans ORDER BY price").fetchall()
+        settings={r["key"]:r["value"] for r in c.execute("SELECT * FROM settings").fetchall()}
+        api_tokens=c.execute("SELECT id,name,token_prefix,scopes,created_at,expires_at,last_used_at,revoked_at FROM api_tokens ORDER BY id DESC").fetchall()
+    return users,bots,payments,plans,settings,api_tokens
+
+@app.get("/admin/bots")
+@admin_required
+def admin_bots_page():
+    return render_template("workspace.html",page="admin_bots",bots=_admin_page_data()[1])
+
+@app.get("/admin/payments")
+@admin_required
+def admin_payments_page():
+    return render_template("workspace.html",page="admin_payments",payments=_admin_page_data()[2])
+
+@app.get("/admin/users")
+@admin_required
+def admin_users_page():
+    return render_template("workspace.html",page="admin_users",users=_admin_page_data()[0])
+
+@app.get("/admin/settings")
+@admin_required
+def admin_settings_page():
+    data=_admin_page_data()
+    return render_template("workspace.html",page="admin_settings",settings=data[4])
+
+@app.get("/admin/plans")
+@admin_required
+def admin_plans_page():
+    return render_template("workspace.html",page="admin_plans",plans=_admin_page_data()[3])
+
+@app.get("/admin/api")
+@admin_required
+def admin_api_page():
+    data=_admin_page_data()
+    token=session.pop("new_api_token",None)
+    return render_template("workspace.html",page="admin_api",api_tokens=data[5],api_scopes=API_SCOPES,new_api_token=token)
+
 @app.post("/upload")
 @login_required
 def upload():
