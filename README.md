@@ -55,6 +55,8 @@ CYBER HOST is a self-hostable bot management panel designed to make bot deployme
 - `.js` — single JavaScript bot file.
 - `.zip` — project archive. Python projects can include `requirements.txt`; JavaScript projects can include `package.json`.
 
+Manual file uploads (`.py`, `.js`, `.zip`) also include an **Environment Variables** editor. Add keys such as `BOT_TOKEN`, `API_ID`, `API_HASH`, or `MONGO_URI` before uploading. Up to 50 variables are accepted, each value up to 4,000 characters. Values are encrypted at rest and loaded into the bot process on every start. Keep the same stable `SECRET_KEY` so saved values remain decryptable.
+
 For best results, keep one clear entry file in the project. For ZIP projects, include the correct dependency manifest and entry script.
 
 ---
