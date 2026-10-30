@@ -618,7 +618,28 @@ def upload():
     safe = secure_filename(f.filename)
     ext = Path(safe).suffix.lower()
     if ext not in ALLOWED:
-        flash("Only .py, .js and .zip files are accepted.", "danger"); return redirect(url_for("dashboard"))
+        flash("Only .py, .js and .zip files are accepted.", "danger"); return redirect(url_for("create_bot_page"))
+    # Validate environment values before writing the uploaded file.
+    raw_env = request.form.get("env_json", "{}")
+    if len(raw_env) > 20000:
+        flash("Environment configuration exceeds 20 KB.", "danger"); return redirect(url_for("create_bot_page"))
+    try:
+        env_values = json.loads(raw_env or "{}")
+    except json.JSONDecodeError:
+        flash("Environment variables were not valid JSON.", "danger"); return redirect(url_for("create_bot_page"))
+    if not isinstance(env_values, dict) or len(env_values) > 50:
+        flash("Add no more than 50 environment variables.", "danger"); return redirect(url_for("create_bot_page"))
+    clean_env = {}
+    reserved_env = {"PATH","HOME","PYTHONPATH","LD_PRELOAD","LD_LIBRARY_PATH","PORT","SECRET_KEY","SUPABASE_SERVICE_KEY","GITHUB_CLIENT_SECRET"}
+    for key, value in env_values.items():
+        key = str(key).strip()
+        if not key or len(key) > 100 or not key.replace("_", "A").isalnum() or not key[0].isalpha() or key.upper() in reserved_env:
+            flash("Invalid or reserved environment variable name: " + key[:80], "danger")
+            return redirect(url_for("create_bot_page"))
+        if not isinstance(value, str) or len(value) > 4000:
+            flash("Environment values must be text up to 4,000 characters.", "danger")
+            return redirect(url_for("create_bot_page"))
+        clean_env[key] = value
     if bot_count(u["id"]) >= (10**6 if u["is_admin"] else 2):
         flash("Your current demo limit is 2 bots. Configure plan entitlements before production.", "warning")
         return redirect(url_for("dashboard"))
@@ -635,6 +656,11 @@ def upload():
         with db() as c:
             c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,?)",
                       (u["id"], name[:80], stored, initial_status))
+            created = c.execute("SELECT id FROM bots WHERE filename=?", (stored,)).fetchone()
+            if clean_env:
+                encrypted_env = _bot_env_fernet().encrypt(json.dumps(clean_env).encode()).decode()
+                c.execute("INSERT OR REPLACE INTO bot_envs(bot_id,env_blob) VALUES(?,?)",
+                          (created["id"], encrypted_env))
     except Exception:
         local_upload.unlink(missing_ok=True)
         if _storage_enabled():
