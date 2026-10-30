@@ -1,4 +1,4 @@
-import os, sqlite3, secrets, subprocess, sys, time, threading, zipfile, shutil, ast, urllib.request, hashlib, json
+import os, sqlite3, secrets, base64, subprocess, sys, time, threading, zipfile, shutil, ast, urllib.request, hashlib, json
 from datetime import timedelta
 from pathlib import Path
 from functools import wraps
