@@ -1628,6 +1628,8 @@ def github_deploy():
         flash("Invalid repository name.","danger"); return redirect(url_for("github_page"))
     if bot_count(user["id"]) >= (10**6 if user["is_admin"] else 2):
         flash("Your current bot limit has been reached.","warning"); return redirect(url_for("github_page"))
+    local = None
+    stored = None
     try:
         repository=json.loads(_github_api(f"/repos/{owner}/{repo_name}",token))
         branch=branch or repository.get("default_branch","main")
@@ -1688,7 +1690,17 @@ def github_deploy():
             threading.Thread(target=run_bot,args=(bot,),name=f"github-bot-{bot['id']}",daemon=True).start()
             flash(f"Imported {full_name} ({branch}); launch requested.","success")
         else: flash(f"Imported {full_name} ({branch}); waiting for admin approval.","success")
-    except Exception as exc: flash("GitHub import failed: "+str(exc)[:250],"danger")
+    except Exception as exc:
+        # Remove a downloaded archive if validation failed before the bot row was created.
+        if stored:
+            with db() as c:
+                saved_bot = c.execute("SELECT id FROM bots WHERE filename=?", (stored,)).fetchone()
+            if not saved_bot:
+                if local:
+                    local.unlink(missing_ok=True)
+                if _storage_enabled():
+                    _storage_delete("uploads/" + stored)
+        flash("GitHub import failed: "+str(exc)[:250],"danger")
     return redirect(url_for("my_bots"))
 
 with db() as _github_db:
