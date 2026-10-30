@@ -1279,7 +1279,7 @@ def create_api_token():
     days = max(1, min(365, days))
     if not name or not chosen:
         flash("Give the token a name and choose at least one permission.", "danger")
-        return redirect(url_for("admin") + "#api-access")
+        return redirect(url_for("admin_api_page"))
     raw = "ch_live_" + secrets.token_urlsafe(32)
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     from datetime import datetime, timezone, timedelta as dt_timedelta
@@ -1336,7 +1336,7 @@ def admin_bot(bot_id, action):
     elif action in ("stop","restart","delete"):
         return bot_action.__wrapped__(bot_id, action)
     else: abort(400)
-    return redirect(url_for("admin"))
+    return redirect(url_for("admin_bots_page"))
 
 @app.post("/admin/payment/<int:payment_id>/<action>")
 @admin_required
@@ -1351,7 +1351,7 @@ def admin_payment(payment_id, action):
         elif action == "reject":
             c.execute("UPDATE payments SET status='rejected' WHERE id=?", (payment_id,))
         else: abort(400)
-    flash("Payment updated.", "success"); return redirect(url_for("admin"))
+    flash("Payment updated.", "success"); return redirect(url_for("admin_payments_page"))
 
 @app.post("/admin/user/<int:user_id>/credits")
 @admin_required
@@ -1359,7 +1359,7 @@ def admin_credits(user_id):
     try: amount = int(request.form.get("amount","0"))
     except ValueError: amount = 0
     with db() as c: c.execute("UPDATE users SET credits=MAX(0,credits+?) WHERE id=?", (amount,user_id))
-    flash("User credits updated.", "success"); return redirect(url_for("admin"))
+    flash("User credits updated.", "success"); return redirect(url_for("admin_users_page"))
 
 @app.post("/buy")
 @login_required
@@ -1374,7 +1374,7 @@ def buy():
     else:
         with db() as c: c.execute("INSERT INTO payments(user_id,plan_id,utr) VALUES(?,?,?)",(u["id"],plan_id,utr[:100]))
         flash("Payment submitted for admin verification.", "success")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("store_page"))
 
 @app.get("/payment-qr")
 def payment_qr():
@@ -1412,7 +1412,7 @@ def save_settings():
         mime_by_ext = {".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".webp":"image/webp"}
         if ext not in mime_by_ext:
             flash("QR image must be PNG, JPG, JPEG, or WEBP.", "danger")
-            return redirect(url_for("admin") + "#settings")
+            return redirect(url_for("admin_settings_page"))
         data = qr_file.read()
         if not data or len(data) > 5 * 1024 * 1024:
             flash("Choose a valid QR image up to 5 MB.", "danger")
@@ -1472,13 +1472,13 @@ def save_plan():
         flash("Plan saved.", "success")
     except Exception:
         flash("Could not save plan. Check the values.", "danger")
-    return redirect(url_for("admin"))
+    return redirect(url_for("admin_plans_page"))
 
 @app.post("/admin/plan/<int:plan_id>/delete")
 @admin_required
 def delete_plan(plan_id):
     with db() as c: c.execute("UPDATE plans SET active=0 WHERE id=?", (plan_id,))
-    flash("Plan disabled.", "success"); return redirect(url_for("admin"))
+    flash("Plan disabled.", "success"); return redirect(url_for("admin_plans_page"))
 
 @app.errorhandler(403)
 def forbidden(e): return render_template("error.html", code=403, message="Admin access required."), 403
