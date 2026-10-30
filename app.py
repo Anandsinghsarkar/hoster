@@ -1239,7 +1239,7 @@ def bot_action(bot_id, action):
             threading.Thread(target=run_bot, args=(fresh,), daemon=True).start()
             flash("Restart requested.", "success")
     else: abort(400)
-    return redirect(url_for("admin") if u["is_admin"] else url_for("dashboard"))
+    return redirect(url_for("admin") if u["is_admin"] else url_for("my_bots"))
 
 @app.get("/admin")
 @admin_required
@@ -1290,7 +1290,7 @@ def create_api_token():
         token_id = cur.lastrowid
     session["new_api_token"] = {"id": token_id, "name": name, "token": raw, "scopes": chosen, "expires_at": expiry}
     flash("API token created. Copy it now; the full token will not be shown again.", "success")
-    return redirect(url_for("admin") + "#api-access")
+    return redirect(url_for("admin_api_page"))
 
 @app.post("/admin/api-tokens/<int:token_id>/revoke")
 @admin_required
@@ -1298,7 +1298,7 @@ def revoke_api_token(token_id):
     with db() as c:
         c.execute("UPDATE api_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE id=? AND revoked_at IS NULL", (token_id,))
     flash("API token revoked. Requests using it will stop working.", "success")
-    return redirect(url_for("admin") + "#api-access")
+    return redirect(url_for("admin_api_page"))
 
 @app.get("/admin/bot/<int:bot_id>/file")
 @admin_required
@@ -1416,14 +1416,14 @@ def save_settings():
         data = qr_file.read()
         if not data or len(data) > 5 * 1024 * 1024:
             flash("Choose a valid QR image up to 5 MB.", "danger")
-            return redirect(url_for("admin") + "#settings")
+            return redirect(url_for("admin_settings_page"))
         object_path = "settings/payment-qr" + ext
         content_type = mime_by_ext[ext]
         local_name = "payment-qr" + ext
         (DATA / local_name).write_bytes(data)
         if _storage_enabled() and not _storage_upload_bytes(object_path, data, content_type):
             flash("QR upload failed. Check Supabase Storage configuration and Render logs.", "danger")
-            return redirect(url_for("admin") + "#settings")
+            return redirect(url_for("admin_settings_page"))
         with db() as c:
             c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_storage_path',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (object_path if _storage_enabled() else "",))
             c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_content_type',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (content_type,))
@@ -1444,12 +1444,12 @@ def save_settings():
         external_url = request.form.get("payment_qr_url", "").strip()[:1000]
         if not external_url.startswith(("https://", "http://")):
             flash("QR URL must start with https:// or http://.", "danger")
-            return redirect(url_for("admin") + "#settings")
+            return redirect(url_for("admin_settings_page"))
         with db() as c:
             c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_url',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (external_url,))
             c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_storage_path','') ON CONFLICT(key) DO UPDATE SET value=''")
             c.execute("INSERT INTO settings(key,value) VALUES('payment_qr_filename','') ON CONFLICT(key) DO UPDATE SET value=''")
-    flash("Settings saved.", "success"); return redirect(url_for("admin") + "#settings")
+    flash("Settings saved.", "success"); return redirect(url_for("admin_settings_page"))
 
 @app.post("/admin/plan")
 @admin_required
