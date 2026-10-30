@@ -1839,42 +1839,7 @@ def _tg_list(chat,kind):
 def _tg_process(update):
     if "callback_query" in update:
         q=update["callback_query"];m=q.get("message",{});chat=m.get("chat",{}).get("id");user=q.get("from",{}).get("id")
-        if not _tg_authorized(chat,user):_tg_call("answerCallbackQuery",{"callback_query_id":q["id"],"text":"Not authorized","show_alert":True});return
-        p=q.get("data","").split(":")
-        if len(p)==3 and p[0] in ("bot","pay") and p[1] in ("approve","reject"):
-            kind,action,item=p
-            try:item=int(item)
-            except ValueError:return
-            if kind=="bot":
-                with db() as c:b=c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'",(item,)).fetchone()
-                if not b:return
-                if action=="approve":
-                    with db() as c:c.execute("UPDATE bots SET status='approved',last_error='' WHERE id=?",(item,))
-                    with db() as c:b=c.execute("SELECT * FROM bots WHERE id=?",(item,)).fetchone()
-                    threading.Thread(target=run_bot,args=(b,),daemon=True).start()
-                else:
-                    stop_process(item)
-                    with db() as c:c.execute("UPDATE bots SET status='rejected' WHERE id=?",(item,))
-            else:
-                with db() as c:pmt=c.execute("SELECT * FROM payments WHERE id=? AND status='pending'",(item,)).fetchone()
-                if not pmt:return
-                with db() as c:
-                    c.execute("UPDATE payments SET status=? WHERE id=?",("approved" if action=="approve" else "rejected",item))
-                    if action=="approve":
-                        plan=c.execute("SELECT credits FROM plans WHERE id=?",(pmt["plan_id"],)).fetchone()
-                        if plan:c.execute("UPDATE users SET credits=credits+? WHERE id=?",(plan["credits"],pmt["user_id"]))
-            _tg_call("answerCallbackQuery",{"callback_query_id":q["id"],"text":kind+" "+action+"d"})
-            _tg_notify("Telegram admin action: "+kind+" #"+str(item)+" "+action)
-        elif p and p[0]=="list" and len(p)==2 and p[1] in ("bots","payments","users","stats"):
-            _tg_list(chat,p[1]);_tg_call("answerCallbackQuery",{"callback_query_id":q["id"],"text":"Loaded"})
-        return
-    m=update.get("message",{}); chat=m.get("chat",{}).get("id");user=m.get("from",{}).get("id");text=m.get("text","").strip()
-    cfg=_tg_settings()
-    if not _tg_authorized(chat,user):
-        if text.startswith("/pair ") and cfg.get("tg_admin_pair_code") and secrets.compare_digest(text[6:].strip(),cfg["tg_admin_pair_code"]):
-            with db() as c:
-                for k,v in (("tg_admin_chat_id",str(chat)),("tg_admin_user_id",str(user)),("tg_admin_pair_code","")):c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(k,v))
-            _tg_call("sendMessage",{"chat_id":chat,"text":"✅ Admin paired. Send /menu."});_tg_notify("🟢 Telegram admin bot paired.")
+        if not _tg_authorized(chat,user):
         return
     if text in ("/start","/menu","/help"):
         _tg_call("sendMessage",{"chat_id":chat,"text":"🛡 CYBER HOST ADMIN PANEL","reply_markup":{"inline_keyboard":[[{"text":"📦 Bots","callback_data":"list:bots"},{"text":"💳 Payments","callback_data":"list:payments"}],[{"text":"👥 Users","callback_data":"list:users"},{"text":"📊 Overview","callback_data":"list:stats"}]]}})
@@ -1910,17 +1875,27 @@ def telegram_admin_page():
 @admin_required
 def telegram_admin_connect():
     token=request.form.get("bot_token","").strip()
-    if len(token)<30 or len(token)>200:flash("Invalid BotFather token.","danger");return redirect(url_for("telegram_admin_page"))
+    owner_id=request.form.get("owner_id","").strip()
+    if len(token)<30 or len(token)>200:
+        flash("Invalid BotFather token.","danger");return redirect(url_for("telegram_admin_page"))
+    if not owner_id.isdigit() or len(owner_id)>20:
+        flash("Telegram Owner ID must be a numeric Telegram user ID.","danger");return redirect(url_for("telegram_admin_page"))
     req=urllib.request.Request("https://api.telegram.org/bot"+token+"/getMe")
     try:
         with urllib.request.urlopen(req,timeout=15) as x:info=json.loads(x.read().decode())
         if not info.get("ok"):raise ValueError("Telegram rejected the token.")
-    except Exception as e:flash("Telegram connection failed: "+str(e)[:150],"danger");return redirect(url_for("telegram_admin_page"))
-    encrypted=_bot_env_fernet().encrypt(token.encode()).decode();pair=secrets.token_urlsafe(8)
+    except Exception as e:
+        flash("Telegram connection failed: "+str(e)[:150],"danger");return redirect(url_for("telegram_admin_page"))
+    # For a private Telegram chat, the owner's user ID is also the chat ID.
+    # The owner must press Start on this bot first so Telegram permits messages.
+    encrypted=_bot_env_fernet().encrypt(token.encode()).decode()
     with db() as c:
-        for k,v in (("tg_admin_token",encrypted),("tg_admin_chat_id",""),("tg_admin_user_id",""),("tg_admin_pair_code",pair)):
+        for k,v in (("tg_admin_token",encrypted),("tg_admin_chat_id",owner_id),("tg_admin_user_id",owner_id),("tg_admin_pair_code","")):
             c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(k,v))
-    _tg_start();flash("Bot connected. Open it in Telegram and send /pair "+pair,"success");return redirect(url_for("telegram_admin_page"))
+    _tg_start()
+    _tg_call("sendMessage",{"chat_id":owner_id,"text":"✅ CYBER HOST Admin Bot connected. Your Telegram account is authorized. Send /menu to open controls."})
+    flash("Telegram bot connected to the supplied Owner ID. Open the bot in Telegram and press Start if you have not already.","success")
+    return redirect(url_for("telegram_admin_page"))
 @app.post("/admin/telegram/disconnect")
 @admin_required
 def telegram_admin_disconnect():
