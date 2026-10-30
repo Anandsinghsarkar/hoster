@@ -164,12 +164,12 @@ Only import source code you trust: deployed Python/JavaScript projects execute i
 ## `06 // TELEGRAM ADMIN BOT`
 
 1. Sign in as the website administrator and open **Admin → Telegram Admin Bot**.
-2. Create a bot with Telegram's official BotFather and paste its token into the page.
-3. Open the newly created bot in a private Telegram chat, press Start, then send the one-time `/pair CODE` displayed by the website.
+2. Create a bot with Telegram's official BotFather and paste its token and numeric Telegram Owner ID into the page.
+3. In the website form, enter the BotFather token and your numeric Telegram Owner ID (get it by messaging `@userinfobot`). Before connecting, open your new bot in a private chat and press Start. Click Connect; no pairing code is needed.
 4. Use `/menu` for the admin keyboard. It includes Bots, Payments, Users and Overview. Bot uploads are delivered as documents with approve/reject buttons. Pending payment requests also have approve/reject buttons. Use `/credit USER_ID AMOUNT` to adjust a user's credits (positive or negative).
-5. The bot remains connected until **Disconnect Bot** is pressed. The encrypted token and pairing state require persistent database storage and an unchanged `SECRET_KEY` across restarts.
+5. The bot remains connected until **Disconnect Bot** is pressed. The encrypted token and owner ID require persistent database storage and an unchanged `SECRET_KEY` across restarts.
 
-**Security:** Only the paired Telegram account ID and private chat ID are authorized. Never forward the bot token or pairing code. Telegram file delivery sends the uploaded source archive as-is; it is not a malware verdict or sandbox scan. Do not automatically execute untrusted uploads just because they were delivered to Telegram. Inspect code in a separate safe environment before approval. This polling integration is intended for a single app instance/worker; avoid running multiple Gunicorn workers or multiple Render instances with the same token.
+**Security:** Only the configured numeric Telegram Owner ID is authorized for both the private chat and sender account. Never share the bot token. Telegram requires the owner to start the bot before it can send private messages. Telegram file delivery sends the uploaded source archive as-is; it is not a malware verdict or sandbox scan. Do not automatically execute untrusted uploads just because they were delivered to Telegram. Inspect code in a separate safe environment before approval. This polling integration is intended for a single app instance/worker; avoid running multiple Gunicorn workers or multiple Render instances with the same token.
 
 ## `07 // BOT DEPLOYMENT WORKFLOW`
 
@@ -315,7 +315,7 @@ Other important limitations:
 - Self-pinging is best-effort and cannot guarantee 24/7 uptime.
 - A bot that crashes because of invalid credentials, code errors or incompatible dependencies will not be automatically repaired by restarting it.
 - Manual UPI review is not automated payment verification.
-- Telegram admin bot is optional and requires a BotFather token plus a one-time private-chat pairing code. It sends login/register/logout, upload and payment alerts; source files are sent to the paired admin chat for manual review. Inline buttons can approve/reject bots and payments; user listing and credit adjustments are available. It does not run a reliable malware scanner, and source review must be performed by the admin.
+- Telegram admin bot is optional and requires a BotFather token plus the owner's numeric Telegram ID; no pairing code is used. It sends login/register/logout, upload and payment alerts; source files are sent to the paired admin chat for manual review. Inline buttons can approve/reject bots and payments; user listing and credit adjustments are available. It does not run a reliable malware scanner, and source review must be performed by the admin.
 - This starter does not include Google OAuth or a live payment gateway.
 - Keep `SECRET_KEY`, `ADMIN_PASSWORD` and `SUPABASE_SERVICE_KEY` private.
 
@@ -359,7 +359,7 @@ Set a strong `ADMIN_PASSWORD` and `SECRET_KEY` in your environment before using 
 | Credit plans and manual UPI review | Included |
 | Supabase Storage persistence | Optional configuration |
 | Scoped API tokens | Included |
-| Telegram admin bot notifications and remote controls | Optional; configure and pair in Admin → Telegram Admin Bot |\n| GitHub OAuth repository import | Requires OAuth App configuration |
+| Telegram admin bot notifications and remote controls | Optional; configure token and Owner ID in Admin → Telegram Admin Bot |\n| GitHub OAuth repository import | Requires OAuth App configuration |
 | Guaranteed 24/7 free runtime | Not guaranteed |
 | Secure isolation for untrusted public code | Requires additional infrastructure |
 
