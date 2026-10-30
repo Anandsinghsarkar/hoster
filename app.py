@@ -1838,19 +1838,79 @@ def _tg_list(chat,kind):
         _tg_call("sendMessage",{"chat_id":chat,"text":"📊 Users: "+str(vals[0])+"\nBots: "+str(vals[1])+"\nPending bots: "+str(vals[2])+"\nPending payments: "+str(vals[3])})
 def _tg_process(update):
     if "callback_query" in update:
-        q=update["callback_query"];m=q.get("message",{});chat=m.get("chat",{}).get("id");user=q.get("from",{}).get("id")
-        if not _tg_authorized(chat,user):
+        q=update["callback_query"]
+        message=q.get("message", {})
+        chat=message.get("chat", {}).get("id")
+        user=q.get("from", {}).get("id")
+        if not _tg_authorized(chat, user):
+            _tg_call("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Not authorized", "show_alert": True})
+            return
+        parts=q.get("data", "").split(":")
+        if len(parts)==3 and parts[0] in ("bot", "pay") and parts[1] in ("approve", "reject"):
+            kind, action, raw_id=parts
+            try:
+                item=int(raw_id)
+            except ValueError:
+                _tg_call("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Invalid item"})
+                return
+            if kind=="bot":
+                with db() as c:
+                    bot=c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'", (item,)).fetchone()
+                if not bot:
+                    _tg_call("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Bot not found"})
+                    return
+                if action=="approve":
+                    with db() as c:
+                        c.execute("UPDATE bots SET status='approved',last_error='' WHERE id=?", (item,))
+                    with db() as c:
+                        fresh=c.execute("SELECT * FROM bots WHERE id=?", (item,)).fetchone()
+                    threading.Thread(target=run_bot, args=(fresh,), daemon=True).start()
+                else:
+                    stop_process(item)
+                    with db() as c:
+                        c.execute("UPDATE bots SET status='rejected' WHERE id=?", (item,))
+            else:
+                with db() as c:
+                    payment=c.execute("SELECT * FROM payments WHERE id=? AND status='pending'", (item,)).fetchone()
+                if not payment:
+                    _tg_call("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Payment already processed or missing"})
+                    return
+                with db() as c:
+                    c.execute("UPDATE payments SET status=? WHERE id=?", ("approved" if action=="approve" else "rejected", item))
+                    if action=="approve":
+                        plan=c.execute("SELECT credits FROM plans WHERE id=?", (payment["plan_id"],)).fetchone()
+                        if plan:
+                            c.execute("UPDATE users SET credits=credits+? WHERE id=?", (plan["credits"], payment["user_id"]))
+            _tg_call("answerCallbackQuery", {"callback_query_id": q["id"], "text": kind+" "+action+"d"})
+            _tg_notify("Telegram admin action: "+kind+" #"+str(item)+" "+action)
+        elif len(parts)==2 and parts[0]=="list" and parts[1] in ("bots", "payments", "users", "stats"):
+            _tg_list(chat, parts[1])
+            _tg_call("answerCallbackQuery", {"callback_query_id": q["id"], "text": "Loaded"})
         return
-    if text in ("/start","/menu","/help"):
-        _tg_call("sendMessage",{"chat_id":chat,"text":"🛡 CYBER HOST ADMIN PANEL","reply_markup":{"inline_keyboard":[[{"text":"📦 Bots","callback_data":"list:bots"},{"text":"💳 Payments","callback_data":"list:payments"}],[{"text":"👥 Users","callback_data":"list:users"},{"text":"📊 Overview","callback_data":"list:stats"}]]}})
-    elif text.startswith("/credit "):
+
+    message=update.get("message", {})
+    chat=message.get("chat", {}).get("id")
+    user=message.get("from", {}).get("id")
+    command=message.get("text", "").strip()
+    if not _tg_authorized(chat, user):
+        return
+    if command in ("/start", "/menu", "/help"):
+        _tg_call("sendMessage", {"chat_id": chat, "text": "🛡 CYBER HOST ADMIN PANEL", "reply_markup": {"inline_keyboard": [[{"text": "📦 Bots", "callback_data": "list:bots"}, {"text": "💳 Payments", "callback_data": "list:payments"}], [{"text": "👥 Users", "callback_data": "list:users"}, {"text": "📊 Overview", "callback_data": "list:stats"}]]}})
+    elif command.startswith("/credit "):
         try:
-            _,uid,amount=text.split();uid=int(uid);amount=int(amount)
-            if amount==0 or abs(amount)>100000:raise ValueError()
-            with db() as c:c.execute("UPDATE users SET credits=MAX(0,credits+?) WHERE id=?",(amount,uid))
-            _tg_call("sendMessage",{"chat_id":chat,"text":"Credits updated for user #"+str(uid)})
-        except Exception:_tg_call("sendMessage",{"chat_id":chat,"text":"Use /credit USER_ID AMOUNT"})
-    elif text=="/users":_tg_list(chat,"users")
+            _, uid, amount=command.split()
+            uid=int(uid)
+            amount=int(amount)
+            if amount==0 or abs(amount)>100000:
+                raise ValueError()
+            with db() as c:
+                changed=c.execute("UPDATE users SET credits=MAX(0,credits+?) WHERE id=?", (amount, uid)).rowcount
+            _tg_call("sendMessage", {"chat_id": chat, "text": "Credits updated for user #"+str(uid) if changed else "User not found."})
+        except Exception:
+            _tg_call("sendMessage", {"chat_id": chat, "text": "Use /credit USER_ID AMOUNT"})
+    elif command=="/users":
+        _tg_list(chat, "users")
+
 def _tg_worker():
     offset=0
     while True:
