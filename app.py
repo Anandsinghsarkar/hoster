@@ -1505,9 +1505,6 @@ _start_keep_alive()
 if _storage_enabled():
     threading.Thread(target=_restore_approved_bots, name="restore-approved-bots", daemon=True).start()
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", "10000"))
-    app.run(host="0.0.0.0", port=port)
 
 
 # ================= GITHUB OAUTH DEPLOYMENT MODULE =================
@@ -1670,3 +1667,7 @@ with db() as _github_db:
         access_token TEXT NOT NULL, connected_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(id))""")
 # ================= END GITHUB OAUTH DEPLOYMENT MODULE =================
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port)
