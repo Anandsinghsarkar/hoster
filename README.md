@@ -147,6 +147,13 @@ The app requests `read:user` and `repo` scopes so it can list private and public
 - This is a one-time import, not automatic redeployment after future Git pushes. Re-import the repository to update the hosted copy.
 - The access token is encrypted at rest using a key derived from the app's stable `SECRET_KEY`. Keep `SECRET_KEY` unchanged between deploys; otherwise saved GitHub connections cannot be decrypted. Disconnecting removes the saved token.
 
+### Per-bot environment variables
+
+When importing a GitHub repository, expand **Add environment variables** and enter the exact names your code reads, for example `BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`, `API_ID`, `API_HASH`, or `MONGO_URI`. Add as many as needed (maximum 50; each value up to 4,000 characters). The importer encrypts these values at rest in the database and injects them only into that bot's process. They are not printed in logs or displayed again after submission. Restart/redeploy the bot after changing environment values.
+
+GitHub connection remains saved to the CYBER HOST account until the user explicitly disconnects it. It survives browser logout and server restarts only when the database snapshot persistence is configured and the same stable `SECRET_KEY` is retained. GitHub repository listing is paginated (up to 10,000 repositories per account view).
+
+
 Only import source code you trust: deployed Python/JavaScript projects execute inside the hosting container.
 
 ---
