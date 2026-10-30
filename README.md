@@ -1,92 +1,323 @@
-# CYBER HOST — Premium Bot Hosting Dashboard
+<div align="center">
 
-A premium-styled Flask starter for managing user-uploaded Python, JavaScript and ZIP bot projects. Includes user accounts, admin review, bot controls, plan management, manual UPI/UTR payment review, credits, and settings.
+# ☠️ CYBER HOST // BOT DEPLOYMENT SYSTEM
 
-## Deploy on Render
-1. Upload this project to a new GitHub repository, or use **New > Web Service** to connect the repository.
-2. Render uses the included `Dockerfile`, which provides Python and Node.js/npm. This configuration does not require a paid persistent disk. If you already have an existing Render service configured with the Python runtime and Render does not allow changing its runtime, create a new Web Service from this repo and select the Docker runtime.
-3. Set `ADMIN_PASSWORD` to a strong password in Render environment variables before launch. `ADMIN_USERNAME` defaults to `admin`.
-4. Deploy. The app uses a 365-day persistent login cookie and configures a best-effort health ping every 10 minutes using Render's RENDER_EXTERNAL_URL. Open `/login` and sign in with the admin credentials.
-5. Change the UPI ID, QR URL, support text and site name in Admin.
+### `FREE PYTHON • JAVASCRIPT • ZIP TELEGRAM BOT HOSTING`
 
-## Android/mobile navigation and payment QR
-- On phones, the signed-in site has a fixed bottom navigation bar: **Dashboard**, **My Bots**, **Create Bot**, and **Store**. Admins get **Dashboard**, **Bots**, **Payments**, and **Settings** buttons.
-- In Admin → Platform settings, enter a public HTTPS QR image URL **or** upload a PNG/JPG/JPEG/WEBP image up to 5 MB. The QR and UPI ID are displayed in the user's Store section. Saving other settings or refreshing the page does not clear the saved QR; use the explicit remove checkbox only when you want to delete it.
-- For restart-safe uploaded QR storage, configure the private Supabase Storage bucket `bot-files` and the three Supabase environment variables described below. The QR image is saved in that bucket at `settings/payment-qr.<extension>`; its setting is stored in the app database snapshot. Without Supabase, an uploaded QR is saved locally and may disappear when Render replaces its ephemeral instance.
-- Admin-uploaded bot files are marked approved and launch is requested automatically. Normal users' uploads remain **pending** until an admin uses **Inspect file** in the review queue to view/download the submitted source, then approves or rejects it.
-- Admin dashboard shows bot counts, pending reviews, approved purchase totals, and per-user approved purchase amounts. The user's dashboard shows their own bots, payment requests, and approved purchase total.
-- This is a manual UPI/UTR flow: submitting a UTR creates a pending request. An admin must verify the payment and approve it; this starter does not automatically verify bank transfers.
+`[ SYSTEM ONLINE ]` · `[ ANDROID READY ]` · `[ OPEN SOURCE PANEL ]`
 
-## Termux-style per-bot web terminal
-- A floating **Terminal** shortcut appears in the lower corner on the dashboard (it opens the first listed bot); each bot row also has its own Terminal button. Users can only access their own bots; admins can access any bot.
-- The terminal uses a dark, mobile-friendly Termux-inspired interface. Enter a supported command and press Enter/➜; each command runs separately, then you can type the next command. Output is added to terminal history without reloading the page. If a bot upload exists but its runtime has not been created yet, opening the terminal prepares a workspace from the uploaded `.py`, `.js`, or `.zip` file, so commands can be run before starting the bot.
-- Supported commands include `help`, `pwd`, `ls [relative-path]`, `cat <file>`, `python --version`, `python <file.py> [args...]`, `python -m py_compile <file.py>`, `pip list`, `pip install <package>`, `pip install -r requirements.txt`, `node --version`, `node <file.js> [args...]`, `node --check <file.js>`, `npm --version`, and `npm list`. Python packages installed from the terminal are placed in that bot's local `vendor` folder rather than globally. Script runs have a 20-second limit and dependency installs have a 90-second limit. The **Live logs** tab refreshes the selected bot's process logs every 2 seconds. Recent terminal command/output history is saved in that browser's local storage (up to 40 entries per bot) and can be cleared with the clear button.
-- This is a restricted project terminal, not a full Linux/Termux shell: arbitrary shell commands, shell operators, network/system administration commands and paths outside the project are disabled on this shared host. Python package installation is restricted to the selected bot's local `vendor` folder. The terminal does not attach to the bot's existing process stdin; use the bot process logs for live stdout/stderr. Package installation happens during bot setup from its `requirements.txt` or `package.json`. A failed command or broken bot cannot be guaranteed to become successful just by restarting; inspect the actual error/log output and fix missing dependencies, invalid tokens, syntax errors, or application exceptions. Automatic blind restarts can repeat the same failure and create a restart loop, so this starter does not claim to auto-fix arbitrary command errors.
-- The floating Terminal shortcut is shown on every signed-in page; when a bot is available it opens a bot terminal, otherwise it links to the dashboard's bot list. If a bot exits unexpectedly, its status message now includes a recent log excerpt to help identify the actual traceback or error. This diagnostic does not automatically fix errors in the uploaded bot code; inspect Live logs and correct the reported exception.\n- The bot must have been started at least once so its runtime folder exists. This is not a security sandbox; uploaded bot code still runs in the shared host environment. Do not expose untrusted code publicly without isolated containers, resource limits and security testing.
+**Upload. Configure. Launch. Monitor.**
 
-## Login persistence and health ping
-- Successful login creates a permanent Flask session cookie that lasts up to 365 days and refreshes as the user visits the site. It ends when the user signs out, clears browser cookies, or the cookie expires. Keep Render's generated SECRET_KEY stable between deploys; changing it invalidates existing sessions.
-- The /health and /ping endpoints return a lightweight ok response for health checks. When KEEP_ALIVE_ENABLED=true and RENDER_EXTERNAL_URL is available, the app makes a best-effort request to its own health endpoint every 10 minutes. You can change the interval with KEEP_ALIVE_INTERVAL_MINUTES (supported range 5–14) or set KEEP_ALIVE_URL to the public base URL.
-- This cannot guarantee 24/7 uptime. Render can restart services or suspend free instances independently of app code, and self-pings may not prevent sleep in every configuration. Render's official free-instance documentation describes the 15-minute idle spin-down and ephemeral filesystem limitations: https://render.com/docs/free. Do not rely on this as a production uptime guarantee.
+A dark, cyberpunk-inspired Telegram bot hosting dashboard built with Flask. Manage Python, JavaScript and ZIP bot projects from a clean mobile-first control panel — including from Android.
 
-## Important production notes
-- When `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, and `SUPABASE_STORAGE_BUCKET=bot-files` are configured, the app stores uploaded project files in the private Supabase Storage bucket and uploads a snapshot of its SQLite database to `_system/hosting.db` after database writes. On a new Render instance it downloads that snapshot, rehydrates missing uploads, and starts bots whose saved status was `approved` or `running`. Logs and runtime dependency folders are still local and may reset; dependencies are rebuilt when bots relaunch. If Supabase is not configured, the app falls back to temporary local storage.
-- **Important architecture limit:** this diskless implementation keeps the app's database as one SQLite snapshot object in Supabase Storage, not as normalized tables in Supabase Postgres. It is intended for one Render web instance only; do not scale to multiple instances or use as a high-concurrency production database. Snapshot upload errors are logged to Render. Long-running bot hosting should ideally run in isolated worker containers with a real managed database and process supervisor.
-- Approved bot files launch as real child processes, stdout/stderr are captured in the Live logs page, and process exits update the bot status. For ZIP Python projects, the app automatically installs dependencies from `requirements.txt`; for a single `.py` upload it tries to detect and install a limited set of common libraries. For uncommon/custom Python packages, upload a ZIP containing `bot.py` and `requirements.txt`. For JavaScript ZIP projects, it runs `npm install` when `package.json` exists, then uses the `start` script or the detected JS entry file. The logs page has Copy logs and Copy error buttons. Setup commands can take a few minutes and their output is included in logs.
-- This is still a starter, not a hardened multi-tenant execution service. Uploaded programs are arbitrary code and can access the app container's files and network. **Do not allow unknown users' uploads on a public production service without isolated containers/sandboxing, strict CPU/RAM/time/network limits, per-user quotas, malware review, and security testing.**
-- Bot processes are local child processes. With Supabase Storage configured, the app attempts to relaunch bots saved as approved/running after a restart, but startup restoration is best-effort and does not guarantee 24/7 operation. For dependable hosting, use a dedicated worker/container service and a process supervisor.
-- Google OAuth, Telegram admin notifications, and a live payment gateway are not wired up. This starter uses username/password accounts and manual UTR approval. Never collect or store users' Google passwords.
-- Payment approval adds the plan's credits. Plan bot limits/duration are displayed/configurable but must be enforced with a proper entitlement system before real paid use.
-- Set a strong `SECRET_KEY` and `ADMIN_PASSWORD`. Do not use the sample admin password in production.
+[Features](#-core-features) · [Deploy](#-quick-deploy) · [Android UI](#-mobile--android-control-panel) · [Storage](#-persistent-storage) · [API](#-scoped-api-access) · [Security](#-security--hosting-limits)
 
+</div>
 
-## Scoped API tokens (GitHub-style permissions)
-The Admin console now includes **API tokens & permissions**. Admins can generate a named bearer token, choose individual scopes, select a 30/90/180/365-day expiry, review last-used time, and revoke a token. The full token is shown only once; only its SHA-256 hash is stored in the database.
+---
+
+## `01 // SYSTEM OVERVIEW`
+
+CYBER HOST is a self-hostable bot management panel designed to make bot deployment simple.
+
+- 🐍 **Python bot hosting** — upload `.py` files or ZIP projects.
+- 🟨 **JavaScript bot hosting** — upload `.js` files or ZIP projects with `package.json`.
+- 📦 **ZIP project hosting** — deploy project folders containing entry files and dependency manifests.
+- 📱 **Android-friendly dashboard** — separate pages, responsive cards and fixed bottom navigation.
+- 🖥️ **Browser terminal** — Termux-inspired, restricted per-project command interface.
+- 📡 **Live logs** — inspect bot output and startup errors.
+- 🛡️ **Admin approval** — review user uploads before launch.
+- 💳 **Credits and manual UPI payments** — configurable plans and admin verification.
+- 🔑 **Scoped API tokens** — issue and revoke tokens with selected permissions.
+
+> **Hosting note:** The panel code is free to self-host. Actual runtime capacity, uptime, storage and free-tier limits depend on the hosting provider. This project does not promise unlimited or guaranteed 24/7 hosting.
+
+---
+
+## `02 // CORE FEATURES`
+
+| Module | Capabilities |
+|---|---|
+| Python runtime | Run `.py` projects; install dependencies from `requirements.txt` |
+| JavaScript runtime | Run `.js` projects; install dependencies from `package.json` |
+| ZIP deployment | Extract supported projects and detect entry files |
+| Bot controls | Start, stop, restart, approve and delete |
+| Live logs | View process output and recent startup diagnostics |
+| Web terminal | Restricted commands for project files and dependencies |
+| User accounts | Registration, login and persistent session cookie |
+| Admin console | Manage bots, users, payments, plans, settings and API tokens |
+| Credit store | Display packages and submit UPI/UTR payment references |
+| Storage | Optional Supabase Storage for uploaded files and database snapshots |
+
+### Supported upload formats
+
+- `.py` — single Python bot file.
+- `.js` — single JavaScript bot file.
+- `.zip` — project archive. Python projects can include `requirements.txt`; JavaScript projects can include `package.json`.
+
+For best results, keep one clear entry file in the project. For ZIP projects, include the correct dependency manifest and entry script.
+
+---
+
+## `03 // MOBILE & ANDROID CONTROL PANEL`
+
+The interface is designed to work on phone screens without needing desktop mode.
+
+### User navigation
+
+- **Dashboard** — account overview and quick links.
+- **My Bots** — view and manage uploaded projects.
+- **Create Bot** — upload a new Python, JS or ZIP project.
+- **Credit Store** — view plans and submit payment references.
+- **My Profile** — account information and sign-out.
+
+### Admin navigation
+
+- **Admin Dashboard** — platform overview.
+- **Bot Management** — review and control hosted projects.
+- **Payment Management** — approve or reject payment requests.
+- **User Management** — inspect users and adjust credits.
+- **Website Settings** — configure site name, UPI, QR and support text.
+- **Plans & Pricing** — edit available credit packages.
+- **API Access** — create, inspect and revoke API tokens.
+
+The bottom navigation is fixed on mobile, with responsive layouts for cards, forms and action buttons.
+
+---
+
+## `04 // QUICK DEPLOY`
+
+### Deploy on Render
+
+1. Fork or push this repository to your GitHub account.
+2. Open Render and create a **New Web Service** connected to this repository.
+3. Use the included **Dockerfile** / Docker runtime. The image installs Python and Node.js.
+4. Add the environment variables below.
+5. Deploy and open your service URL.
+6. Visit `/login` and sign in with your configured admin credentials.
+
+### Required environment variables
+
+| Variable | Value |
+|---|---|
+| `SECRET_KEY` | Strong random secret; keep it private and stable |
+| `ADMIN_USERNAME` | Admin login name; defaults to `admin` |
+| `ADMIN_PASSWORD` | Set a strong admin password before deployment |
+
+### Optional environment variables
+
+| Variable | Purpose |
+|---|---|
+| `DATA_DIR` | Local app data directory; Render config uses `/tmp/cyberhost-data` |
+| `KEEP_ALIVE_ENABLED` | Enables best-effort health ping when set to `true` |
+| `KEEP_ALIVE_INTERVAL_MINUTES` | Ping interval; supported range is 5–14 minutes |
+| `KEEP_ALIVE_URL` | Optional public base URL for the health ping |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_KEY` | Private server-side Supabase service key |
+| `SUPABASE_STORAGE_BUCKET` | Storage bucket name; use `bot-files` |
+
+**Important:** If an existing Render service was created with a different runtime and cannot switch to Docker, create a new Web Service using this repository's Docker configuration.
+
+---
+
+## `05 // BOT DEPLOYMENT WORKFLOW`
+
+1. Create an account and sign in.
+2. Open **Create Bot**.
+3. Enter a project name and upload a `.py`, `.js` or `.zip` file.
+4. Admin uploads are marked approved automatically. Normal user uploads remain pending until an admin reviews them.
+5. Once approved, use the bot controls to start the project.
+6. Open **Terminal** for supported project commands or **Live Logs** to inspect process output.
+
+### Dependency setup
+
+- Python ZIP projects: dependencies are installed from `requirements.txt`.
+- Single Python files: the app attempts limited detection of common libraries.
+- JavaScript ZIP projects: `npm install` is run when `package.json` exists; the app uses its start script or a detected JS entry file.
+
+Dependency installation can take time and can fail if a package is incompatible, unavailable, or exceeds the host's resources. Check the final lines in Live Logs for the actual error.
+
+---
+
+## `06 // WEB TERMINAL & LIVE LOGS`
+
+The browser terminal has a dark, Termux-inspired interface and is intended for basic project tasks.
+
+Supported commands include:
+
+```text
+help
+pwd
+ls
+cat <file>
+python --version
+python <file.py>
+python -m py_compile <file.py>
+pip list
+pip install <package>
+pip install -r requirements.txt
+node --version
+node <file.js>
+node --check <file.js>
+npm --version
+npm list
+```
+
+- Python packages installed from the terminal go into the selected bot's local `vendor` folder.
+- Script execution and dependency installation have time limits.
+- Terminal history is stored in the browser's local storage (up to 40 entries per bot).
+- Live Logs refreshes the selected bot's process output.
+
+**Terminal limitation:** This is not a full Linux shell or unrestricted Termux. Arbitrary shell commands, shell operators, system administration commands and paths outside the project are not supported. The terminal does not attach to the running bot's stdin. Use the website's bot controls to start or restart the bot, and Live Logs to inspect its output.
+
+---
+
+## `07 // PERSISTENT STORAGE`
+
+Render's local filesystem is ephemeral. For persistence across instance replacement, configure Supabase Storage.
+
+### Supabase setup
+
+1. Open your Supabase project.
+2. Create a **private Storage bucket** named `bot-files`.
+3. In Render → Environment, add:
+   - `SUPABASE_URL` — Supabase project URL.
+   - `SUPABASE_SERVICE_KEY` — server-side service-role/secret key.
+   - `SUPABASE_STORAGE_BUCKET` — `bot-files`.
+4. Save and redeploy.
+5. Check Render logs for `[supabase-storage]` errors.
+
+The app stores uploaded files under `uploads/` and a SQLite database snapshot at `_system/hosting.db`. On restart, it attempts to restore the snapshot, rehydrate uploads and relaunch bots with saved approved/running status.
+
+### Storage architecture limits
+
+- The database is stored as a SQLite snapshot object in Supabase Storage; this is **not** a Supabase Postgres database migration.
+- Use one app instance only. Do not scale this snapshot-based design across multiple web instances.
+- Runtime folders, dependency caches and logs are local and may be rebuilt or lost after restart.
+- Without Supabase, local uploads and database files may disappear when the host replaces its ephemeral filesystem.
+- Snapshot upload/download failures must be investigated in Render logs; persistence is not guaranteed until verified.
+
+---
+
+## `08 // SCOPED API ACCESS`
+
+Admins can create named bearer tokens and select permissions. Tokens can be set to expire and revoked. The full token is displayed only once; the database stores its SHA-256 hash.
 
 ### Authentication
-Send the token from a trusted server/backend, never from public browser JavaScript:
+
+Send the token from a trusted backend:
+
 ```http
 Authorization: Bearer ch_live_YOUR_TOKEN
 ```
-The API root `GET /api/v1` lists supported endpoints. Successful responses are JSON. Invalid/expired/revoked tokens return HTTP 401; missing permissions return HTTP 403. User and bot list endpoints are limited to the latest 500 records.
 
-### Permissions and endpoints
-| Scope | Endpoints | Access |
-| --- | --- | --- |
-| No scope | `GET /api/v1` | Public API discovery |
-| Any valid token | `GET /api/v1/me` | Token name, ID and granted scopes |
-| `site:read` | `GET /api/v1/settings` | Public site name, support text and maintenance flag |
-| `users:read` | `GET /api/v1/users` | User IDs, usernames, admin flags, credits and creation dates |
-| `bots:read` | `GET /api/v1/bots`, `GET /api/v1/bots/<id>` | Bot metadata, status and last error |
-| `bots:control` | `POST /api/v1/bots/<id>/actions/approve`, `reject`, `stop`, or `restart` | Approve/reject or control bot process |
-| `bots:delete` | `DELETE /api/v1/bots/<id>` | Delete bot record, upload and runtime folder |
-| `payments:read` | `GET /api/v1/payments` | Payment status, package, username and UTR/reference |
+### API permissions
 
-Example request:
+| Scope | Endpoint access |
+|---|---|
+| No scope | `GET /api/v1` — API discovery |
+| Any valid token | `GET /api/v1/me` |
+| `site:read` | `GET /api/v1/settings` |
+| `users:read` | `GET /api/v1/users` |
+| `bots:read` | `GET /api/v1/bots`, `GET /api/v1/bots/<id>` |
+| `bots:control` | Approve, reject, stop or restart bot actions |
+| `bots:delete` | `DELETE /api/v1/bots/<id>` |
+| `payments:read` | `GET /api/v1/payments` |
+
+Example:
+
 ```bash
 curl -H "Authorization: Bearer ch_live_YOUR_TOKEN" \
   https://YOUR-HOST/api/v1/bots
 ```
 
-**Security:** issue only the minimum scopes required. Treat tokens like passwords, keep them in server-side environment variables, do not commit them to GitHub, and revoke immediately if exposed. The `bots:control` scope can launch uploaded code; only grant it to trusted integrations. This starter does not yet provide API token rate limiting, audit event history, pagination, or write access to users/payments/settings. Protect the admin account and use HTTPS.
+Grant only the scopes an integration needs. Never place API tokens or the Supabase service key in frontend JavaScript, public repositories or screenshots.
 
-## Local run
+---
+
+## `09 // PAYMENTS & CREDITS`
+
+The Store page displays active plans. Users submit a UPI transaction reference/UTR; the request remains pending until an admin checks the payment and approves or rejects it.
+
+Admins can configure:
+- UPI ID.
+- Payment QR image URL or uploaded QR image.
+- Support text and site name.
+- Credit plans and package values.
+- User credit adjustments.
+
+**Payment verification is manual.** This project does not automatically verify bank transfers or provide a built-in live payment gateway. Do not mark a payment approved until it has been checked independently.
+
+---
+
+## `10 // SECURITY & HOSTING LIMITS`
+
+> **Read before allowing public uploads.**
+
+This is a starter hosting panel, not a hardened multi-tenant code execution platform. Uploaded Python and JavaScript code runs as child processes inside the app's host environment. Uploaded code may access files and network resources available to that container.
+
+For a public service, add isolated worker containers, strict CPU/RAM/process/time/network limits, per-user quotas, malware review, audit logs and security testing before accepting untrusted uploads.
+
+Other important limitations:
+
+- Free hosting providers can restart or suspend services.
+- Self-pinging is best-effort and cannot guarantee 24/7 uptime.
+- A bot that crashes because of invalid credentials, code errors or incompatible dependencies will not be automatically repaired by restarting it.
+- Manual UPI review is not automated payment verification.
+- This starter does not include Google OAuth, Telegram admin notifications or a live payment gateway.
+- Keep `SECRET_KEY`, `ADMIN_PASSWORD` and `SUPABASE_SERVICE_KEY` private.
+
+---
+
+## `11 // RUN LOCALLY`
+
+Requirements: Python 3.12+ and Node.js/npm if you want to run JavaScript bot projects.
+
 ```bash
+git clone https://github.com/Anandsinghsarkar/hoster.git
+cd hoster
+
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
+
+# Linux / macOS
+source .venv/bin/activate
+
+# Windows PowerShell
+# .venv\Scripts\Activate.ps1
+
 pip install -r requirements.txt
 python app.py
 ```
-Open `http://127.0.0.1:10000`. Initial admin defaults to `admin` / `ChangeMe123!` only when no admin exists. Override using environment variables.
 
-## Supabase persistence setup
-1. In Supabase, create a **private Storage bucket** named `bot-files` (do not make it public).
-2. In Render → your service → Environment, add:
-   - `SUPABASE_URL`: Project URL from Supabase → Project Settings → API.
-   - `SUPABASE_SERVICE_KEY`: server-side service-role/secret key from the same API settings. Never expose it in HTML, JavaScript, screenshots, or GitHub.
-   - `SUPABASE_STORAGE_BUCKET`: `bot-files`.
-3. Save the variables and redeploy. The app uses the bucket for `uploads/<stored-filename>` and `_system/hosting.db`. A successful file upload is rejected if the configured Storage upload fails.
-4. Confirm the private bucket contains both the uploaded bot objects and `_system/hosting.db`; inspect Render logs for any `[supabase-storage]` errors.
+Open `http://127.0.0.1:10000`.
 
-The service key has broad project privileges. Use it only as a Render secret. This approach persists the existing SQLite database as a Storage object so no SQL schema setup is required; it is not a Supabase Postgres migration and is not suitable for multiple app instances. If you already have data only in Render's ephemeral `/tmp`, that old data cannot be recovered after it has been lost.
+Set a strong `ADMIN_PASSWORD` and `SECRET_KEY` in your environment before using the panel. Never use a sample/default password on a public deployment.
+
+---
+
+## `12 // PROJECT STATUS`
+
+| Component | Status |
+|---|---|
+| Flask web dashboard | Included |
+| Python / JavaScript / ZIP uploads | Included |
+| Admin review and bot controls | Included |
+| Mobile bottom navigation | Included |
+| Web terminal and Live Logs | Included |
+| Credit plans and manual UPI review | Included |
+| Supabase Storage persistence | Optional configuration |
+| Scoped API tokens | Included |
+| Guaranteed 24/7 free runtime | Not guaranteed |
+| Secure isolation for untrusted public code | Requires additional infrastructure |
+
+---
+
+<div align="center">
+
+### `[ END OF TRANSMISSION ]`
+
+**CYBER HOST // BUILD • DEPLOY • MONITOR**
+
+`FREE PANEL CODE` · `PYTHON` · `JAVASCRIPT` · `ZIP` · `ANDROID READY`
+
+</div>
