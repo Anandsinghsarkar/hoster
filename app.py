@@ -492,6 +492,7 @@ def register():
                 with db() as c:
                     c.execute("INSERT INTO users(username,password,credits) VALUES(?,?,1)",
                               (username, generate_password_hash(password)))
+                _tg_notify("👤 <b>New account</b> · <code>"+username+"</code>")
                 flash("Account created. You can now sign in.", "success")
                 return redirect(url_for("login"))
             except sqlite3.IntegrityError:
@@ -506,12 +507,15 @@ def login():
         with db() as c: user = c.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         if user and check_password_hash(user["password"], password):
             session.clear(); session["uid"] = user["id"]; session.permanent = True
+            _tg_notify("🔐 <b>Login</b> · <code>"+user["username"]+"</code> · ID "+str(user["id"]))
             return redirect(url_for("admin") if user["is_admin"] else url_for("dashboard"))
         flash("Invalid username or password.", "danger")
     return render_template("auth.html", mode="login")
 
 @app.get("/logout")
 def logout():
+    old_user=get_user()
+    if old_user: _tg_notify("🚪 <b>Logout</b> · <code>"+old_user["username"]+"</code>")
     session.clear(); return redirect(url_for("index"))
 
 @app.get("/dashboard")
@@ -1266,6 +1270,12 @@ def bot_action(bot_id, action):
             threading.Thread(target=run_bot, args=(fresh,), daemon=True).start()
             flash("Restart requested.", "success")
     else: abort(400)
+    try:
+        with db() as c: row=c.execute("SELECT id FROM bots WHERE filename=?",(stored,)).fetchone()
+        if row:
+            _tg_notify("📦 <b>New bot upload</b> #"+str(row["id"])+" · "+u["username"]+" · "+name[:80],[[{"text":"Approve","callback_data":"bot:approve:"+str(row["id"])},{"text":"Reject","callback_data":"bot:reject:"+str(row["id"])}]])
+            _tg_send_file(row["id"])
+    except Exception: pass
     return redirect(url_for("admin") if u["is_admin"] else url_for("my_bots"))
 
 @app.get("/admin")
@@ -1399,7 +1409,10 @@ def buy():
     if not plan or len(utr) < 6:
         flash("Select a plan and enter a valid UTR/reference number.", "danger")
     else:
-        with db() as c: c.execute("INSERT INTO payments(user_id,plan_id,utr) VALUES(?,?,?)",(u["id"],plan_id,utr[:100]))
+        with db() as c:
+            cur=c.execute("INSERT INTO payments(user_id,plan_id,utr) VALUES(?,?,?)",(u["id"],plan_id,utr[:100]))
+            payment_id=cur.lastrowid
+        _tg_notify("💳 <b>Payment pending</b> #"+str(payment_id)+" · "+u["username"]+" · UTR <code>"+utr[:100]+"</code>",[[{"text":"Approve","callback_data":"pay:approve:"+str(payment_id)},{"text":"Reject","callback_data":"pay:reject:"+str(payment_id)}]])
         flash("Payment submitted for admin verification.", "success")
     return redirect(url_for("store_page"))
 
@@ -1760,6 +1773,162 @@ with db() as _env_db:
         FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE CASCADE)""")
 
 # ================= END GITHUB OAUTH DEPLOYMENT MODULE =================
+
+
+# Telegram admin bot integration. Pairing code prevents strangers who know the bot
+# username from claiming administrator access.
+import html as _tg_html
+_TG_STARTED=False
+_TG_LOCK=threading.Lock()
+def _tg_settings():
+    with db() as c: return {r["key"]:r["value"] for r in c.execute("SELECT key,value FROM settings WHERE key LIKE 'tg_admin_%'")}
+def _tg_token():
+    blob=_tg_settings().get("tg_admin_token","")
+    try: return _bot_env_fernet().decrypt(blob.encode()).decode() if blob else ""
+    except Exception: return ""
+def _tg_call(method,payload=None,timeout=25):
+    token=_tg_token()
+    if not token:return None
+    req=urllib.request.Request("https://api.telegram.org/bot"+token+"/"+method,data=json.dumps(payload or {}).encode(),headers={"Content-Type":"application/json"})
+    try:
+        with urllib.request.urlopen(req,timeout=timeout) as x:
+            out=json.loads(x.read().decode()); return out if out.get("ok") else None
+    except Exception as e:
+        sys.stderr.write("[tg-admin] "+method+": "+str(e)[:160]+"\\n"); return None
+def _tg_notify(text,keyboard=None):
+    cfg=_tg_settings(); chat=cfg.get("tg_admin_chat_id")
+    if chat:
+        p={"chat_id":chat,"text":text,"parse_mode":"HTML","disable_web_page_preview":True}
+        if keyboard:p["reply_markup"]={"inline_keyboard":keyboard}
+        _tg_call("sendMessage",p)
+def _tg_send_file(bot_id):
+    cfg=_tg_settings(); chat=cfg.get("tg_admin_chat_id")
+    if not chat:return
+    with db() as c: b=c.execute("SELECT * FROM bots WHERE id=?",(bot_id,)).fetchone()
+    if not b:return
+    f=UPLOADS/b["filename"]
+    if not f.is_file() and _storage_enabled():_storage_download_file("uploads/"+b["filename"],f)
+    if not f.is_file():_tg_notify("⚠️ File missing for bot #"+str(bot_id));return
+    boundary="----CH"+secrets.token_hex(12); data=bytearray()
+    data.extend(("--"+boundary+"\\r\\nContent-Disposition: form-data; name=\\"chat_id\\"\\r\\n\\r\\n"+str(chat)+"\\r\\n").encode())
+    data.extend(("--"+boundary+"\\r\\nContent-Disposition: form-data; name=\\"caption\\"\\r\\n\\r\\nSource file for bot #"+str(bot_id)+" · "+b["name"]+"\\r\\n").encode())
+    data.extend(("--"+boundary+"\\r\\nContent-Disposition: form-data; name=\\"document\\"; filename=\\""+secure_filename(f.name)+"\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n").encode())
+    data.extend(f.read_bytes());data.extend(("\\r\\n--"+boundary+"--\\r\\n").encode())
+    req=urllib.request.Request("https://api.telegram.org/bot"+_tg_token()+"/sendDocument",data=bytes(data),headers={"Content-Type":"multipart/form-data; boundary="+boundary})
+    try:
+        with urllib.request.urlopen(req,timeout=45):pass
+    except Exception as e:sys.stderr.write("[tg-admin] file send: "+str(e)[:160]+"\\n")
+def _tg_authorized(chat,user):
+    c=_tg_settings();return str(chat)==c.get("tg_admin_chat_id") and str(user)==c.get("tg_admin_user_id")
+def _tg_list(chat,kind):
+    if kind=="bots":
+        with db() as c: rows=c.execute("SELECT id,name,filename,status FROM bots WHERE status IN ('pending','approved','running','error') ORDER BY id DESC LIMIT 15").fetchall()
+        for b in rows:
+            _tg_call("sendMessage",{"chat_id":chat,"text":"Bot #"+str(b["id"])+" · "+b["name"]+"\\n"+b["filename"]+" · "+b["status"],"reply_markup":{"inline_keyboard":[[{"text":"Approve","callback_data":"bot:approve:"+str(b["id"])},{"text":"Reject","callback_data":"bot:reject:"+str(b["id"])}]]}})
+            _tg_send_file(b["id"])
+    elif kind=="payments":
+        with db() as c: rows=c.execute("SELECT p.id,p.utr,u.username,pl.name plan FROM payments p JOIN users u ON u.id=p.user_id JOIN plans pl ON pl.id=p.plan_id WHERE p.status='pending' ORDER BY p.id DESC LIMIT 20").fetchall()
+        for p in rows:_tg_call("sendMessage",{"chat_id":chat,"text":"Payment #"+str(p["id"])+" · "+p["username"]+" · "+p["plan"]+"\\nUTR: "+p["utr"],"reply_markup":{"inline_keyboard":[[{"text":"Approve","callback_data":"pay:approve:"+str(p["id"])},{"text":"Reject","callback_data":"pay:reject:"+str(p["id"])}]]}})
+    elif kind=="users":
+        with db() as c: rows=c.execute("SELECT id,username,credits,is_admin FROM users ORDER BY id DESC LIMIT 30").fetchall()
+        for u in rows:_tg_call("sendMessage",{"chat_id":chat,"text":"#"+str(u["id"])+" · "+u["username"]+" · credits "+str(u["credits"])+(" · ADMIN" if u["is_admin"] else "")})
+    elif kind=="stats":
+        with db() as c:
+            vals=[c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"],c.execute("SELECT COUNT(*) n FROM bots WHERE status!='deleted'").fetchone()["n"],c.execute("SELECT COUNT(*) n FROM bots WHERE status='pending'").fetchone()["n"],c.execute("SELECT COUNT(*) n FROM payments WHERE status='pending'").fetchone()["n"]]
+        _tg_call("sendMessage",{"chat_id":chat,"text":"📊 Users: "+str(vals[0])+"\\nBots: "+str(vals[1])+"\\nPending bots: "+str(vals[2])+"\\nPending payments: "+str(vals[3])})
+def _tg_process(update):
+    if "callback_query" in update:
+        q=update["callback_query"];m=q.get("message",{});chat=m.get("chat",{}).get("id");user=q.get("from",{}).get("id")
+        if not _tg_authorized(chat,user):_tg_call("answerCallbackQuery",{"callback_query_id":q["id"],"text":"Not authorized","show_alert":True});return
+        p=q.get("data","").split(":")
+        if len(p)==3 and p[0] in ("bot","pay") and p[1] in ("approve","reject"):
+            kind,action,item=p
+            try:item=int(item)
+            except ValueError:return
+            if kind=="bot":
+                with db() as c:b=c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'",(item,)).fetchone()
+                if not b:return
+                if action=="approve":
+                    with db() as c:c.execute("UPDATE bots SET status='approved',last_error='' WHERE id=?",(item,))
+                    with db() as c:b=c.execute("SELECT * FROM bots WHERE id=?",(item,)).fetchone()
+                    threading.Thread(target=run_bot,args=(b,),daemon=True).start()
+                else:
+                    stop_process(item)
+                    with db() as c:c.execute("UPDATE bots SET status='rejected' WHERE id=?",(item,))
+            else:
+                with db() as c:pmt=c.execute("SELECT * FROM payments WHERE id=? AND status='pending'",(item,)).fetchone()
+                if not pmt:return
+                with db() as c:
+                    c.execute("UPDATE payments SET status=? WHERE id=?",("approved" if action=="approve" else "rejected",item))
+                    if action=="approve":
+                        plan=c.execute("SELECT credits FROM plans WHERE id=?",(pmt["plan_id"],)).fetchone()
+                        if plan:c.execute("UPDATE users SET credits=credits+? WHERE id=?",(plan["credits"],pmt["user_id"]))
+            _tg_call("answerCallbackQuery",{"callback_query_id":q["id"],"text":kind+" "+action+"d"})
+            _tg_notify("Telegram admin action: "+kind+" #"+str(item)+" "+action)
+        elif p and p[0]=="list" and len(p)==2 and p[1] in ("bots","payments","users","stats"):
+            _tg_list(chat,p[1]);_tg_call("answerCallbackQuery",{"callback_query_id":q["id"],"text":"Loaded"})
+        return
+    m=update.get("message",{}); chat=m.get("chat",{}).get("id");user=m.get("from",{}).get("id");text=m.get("text","").strip()
+    cfg=_tg_settings()
+    if not _tg_authorized(chat,user):
+        if text.startswith("/pair ") and cfg.get("tg_admin_pair_code") and secrets.compare_digest(text[6:].strip(),cfg["tg_admin_pair_code"]):
+            with db() as c:
+                for k,v in (("tg_admin_chat_id",str(chat)),("tg_admin_user_id",str(user)),("tg_admin_pair_code","")):c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(k,v))
+            _tg_call("sendMessage",{"chat_id":chat,"text":"✅ Admin paired. Send /menu."});_tg_notify("🟢 Telegram admin bot paired.")
+        return
+    if text in ("/start","/menu","/help"):
+        _tg_call("sendMessage",{"chat_id":chat,"text":"🛡 CYBER HOST ADMIN PANEL","reply_markup":{"inline_keyboard":[[{"text":"📦 Bots","callback_data":"list:bots"},{"text":"💳 Payments","callback_data":"list:payments"}],[{"text":"👥 Users","callback_data":"list:users"},{"text":"📊 Overview","callback_data":"list:stats"}]]}})
+    elif text.startswith("/credit "):
+        try:
+            _,uid,amount=text.split();uid=int(uid);amount=int(amount)
+            if amount==0 or abs(amount)>100000:raise ValueError()
+            with db() as c:c.execute("UPDATE users SET credits=MAX(0,credits+?) WHERE id=?",(amount,uid))
+            _tg_call("sendMessage",{"chat_id":chat,"text":"Credits updated for user #"+str(uid)})
+        except Exception:_tg_call("sendMessage",{"chat_id":chat,"text":"Use /credit USER_ID AMOUNT"})
+    elif text=="/users":_tg_list(chat,"users")
+def _tg_worker():
+    offset=0
+    while True:
+        try:
+            if not _tg_token():time.sleep(5);continue
+            result=_tg_call("getUpdates",{"offset":offset,"timeout":20,"allowed_updates":["message","callback_query"]},timeout=30)
+            for u in (result or {}).get("result",[]):
+                offset=int(u["update_id"])+1;_tg_process(u)
+        except Exception as e:
+            sys.stderr.write("[tg-admin] poll error: "+str(e)[:160]+"\\n");time.sleep(4)
+def _tg_start():
+    global _TG_STARTED
+    with _TG_LOCK:
+        if not _TG_STARTED:
+            _TG_STARTED=True;threading.Thread(target=_tg_worker,name="telegram-admin-poll",daemon=True).start()
+@app.get("/admin/telegram")
+@admin_required
+def telegram_admin_page():
+    cfg=_tg_settings()
+    return render_template("workspace.html",page="admin_telegram",telegram_connected=bool(cfg.get("tg_admin_token")),telegram_paired=bool(cfg.get("tg_admin_chat_id")))
+@app.post("/admin/telegram/connect")
+@admin_required
+def telegram_admin_connect():
+    token=request.form.get("bot_token","").strip()
+    if len(token)<30 or len(token)>200:flash("Invalid BotFather token.","danger");return redirect(url_for("telegram_admin_page"))
+    req=urllib.request.Request("https://api.telegram.org/bot"+token+"/getMe")
+    try:
+        with urllib.request.urlopen(req,timeout=15) as x:info=json.loads(x.read().decode())
+        if not info.get("ok"):raise ValueError("Telegram rejected the token.")
+    except Exception as e:flash("Telegram connection failed: "+str(e)[:150],"danger");return redirect(url_for("telegram_admin_page"))
+    encrypted=_bot_env_fernet().encrypt(token.encode()).decode();pair=secrets.token_urlsafe(8)
+    with db() as c:
+        for k,v in (("tg_admin_token",encrypted),("tg_admin_chat_id",""),("tg_admin_user_id",""),("tg_admin_pair_code",pair)):
+            c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(k,v))
+    _tg_start();flash("Bot connected. Open it in Telegram and send /pair "+pair,"success");return redirect(url_for("telegram_admin_page"))
+@app.post("/admin/telegram/disconnect")
+@admin_required
+def telegram_admin_disconnect():
+    with db() as c:
+        for k in ("tg_admin_token","tg_admin_chat_id","tg_admin_user_id","tg_admin_pair_code"):c.execute("DELETE FROM settings WHERE key=?",(k,))
+    flash("Telegram bot disconnected.","success");return redirect(url_for("telegram_admin_page"))
+_tg_start()
+# ================ END TELEGRAM ADMIN BOT ================
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
