@@ -821,6 +821,7 @@ def run_bot(bot):
                 shutil.copy2(source, entry)
 
             env = os.environ.copy()
+            env.update(_get_bot_environment(bot_id))
             env.update({
                 "HOME": str(runtime),
                 "PYTHONUNBUFFERED": "1",
@@ -1550,10 +1551,16 @@ def github_page():
         token=_github_access_token(user["id"])
         if token:
             try:
-                for page in range(1,4):
-                    rows=json.loads(_github_api(f"/user/repos?per_page=100&sort=updated&direction=desc&page={page}&affiliation=owner,collaborator,organization_member",token))
+                page = 1
+                while True:
+                    endpoint = "/user/repos?per_page=100&sort=updated&direction=desc&page=" + str(page) + "&affiliation=owner,collaborator,organization_member"
+                    rows=json.loads(_github_api(endpoint,token))
                     repositories.extend(rows)
-                    if len(rows)<100: break
+                    if len(rows) < 100:
+                        break
+                    page += 1
+                    if page > 100:
+                        break
             except Exception as exc: flash("GitHub repository list error: "+str(exc)[:180],"danger")
     return render_template("github.html",connected=connected,repositories=repositories,github_configured=_github_configured())
 
@@ -1649,11 +1656,34 @@ def github_deploy():
         local.write_bytes(archive_bytes)
         if _storage_enabled() and not _storage_upload_file(local,"uploads/"+stored):
             local.unlink(missing_ok=True); raise RuntimeError("Supabase Storage upload failed; check private bot-files bucket.")
+        raw_env = request.form.get("env_json", "{}")
+        if len(raw_env) > 20000:
+            local.unlink(missing_ok=True)
+            if _storage_enabled(): _storage_delete("uploads/" + stored)
+            raise ValueError("Environment configuration exceeds 20 KB.")
+        try:
+            env_values = json.loads(raw_env or "{}")
+        except json.JSONDecodeError:
+            raise ValueError("Environment variables were not valid JSON.")
+        if not isinstance(env_values, dict) or len(env_values) > 50:
+            raise ValueError("Add no more than 50 environment variables.")
+        clean_env = {}
+        for key, value in env_values.items():
+            key = str(key).strip()
+            reserved = {"PATH","HOME","PYTHONPATH","LD_PRELOAD","LD_LIBRARY_PATH","PORT","SECRET_KEY","SUPABASE_SERVICE_KEY","GITHUB_CLIENT_SECRET"}
+            if not key or len(key) > 100 or not key.replace("_", "A").isalnum() or not key[0].isalpha() or key.upper() in reserved:
+                raise ValueError("Invalid or reserved environment variable name: " + key[:80])
+            if not isinstance(value, str) or len(value) > 4000:
+                raise ValueError("Environment values must be text up to 4,000 characters.")
+            clean_env[key] = value
         status="approved" if user["is_admin"] else "pending"
         with db() as c:
             c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,?)",
                 (user["id"],(project_name or repository.get("name") or repo_name)[:80],stored,status))
             bot=c.execute("SELECT * FROM bots WHERE filename=?",(stored,)).fetchone()
+            if clean_env:
+                encrypted_env = _bot_env_fernet().encrypt(json.dumps(clean_env).encode()).decode()
+                c.execute("INSERT OR REPLACE INTO bot_envs(bot_id,env_blob) VALUES(?,?)",(bot["id"],encrypted_env))
         if user["is_admin"]:
             threading.Thread(target=run_bot,args=(bot,),name=f"github-bot-{bot['id']}",daemon=True).start()
             flash(f"Imported {full_name} ({branch}); launch requested.","success")
@@ -1666,6 +1696,31 @@ with db() as _github_db:
         user_id INTEGER PRIMARY KEY, github_login TEXT NOT NULL, github_id TEXT NOT NULL,
         access_token TEXT NOT NULL, connected_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(user_id) REFERENCES users(id))""")
+
+# Per-bot environment variables are encrypted in SQLite and injected only into that bot process.
+def _bot_env_fernet():
+    from cryptography.fernet import Fernet
+    key = base64.urlsafe_b64encode(hashlib.sha256((app.secret_key + "|cyberhost-bot-env-v1").encode()).digest())
+    return Fernet(key)
+
+def _get_bot_environment(bot_id):
+    with db() as c:
+        row = c.execute("SELECT env_blob FROM bot_envs WHERE bot_id=?", (bot_id,)).fetchone()
+    if not row:
+        return {}
+    try:
+        values = json.loads(_bot_env_fernet().decrypt(row["env_blob"].encode()).decode())
+        return values if isinstance(values, dict) else {}
+    except Exception:
+        _write_log(bot_id, "[env] Could not decrypt saved environment variables. Check that SECRET_KEY has not changed.")
+        return {}
+
+with db() as _env_db:
+    _env_db.execute("""CREATE TABLE IF NOT EXISTS bot_envs(
+        bot_id INTEGER PRIMARY KEY, env_blob TEXT NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE CASCADE)""")
+
 # ================= END GITHUB OAUTH DEPLOYMENT MODULE =================
 
 if __name__ == "__main__":
