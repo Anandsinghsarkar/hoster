@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const BACKEND = (process.env.RENDER_BACKEND_URL || 'https://hoster-1-1qzm.onrender.com').replace(/\/$/, '');
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
-  'te', 'trailers', 'transfer-encoding', 'upgrade', 'host'
+  'te', 'trailer', 'trailers', 'transfer-encoding', 'upgrade', 'host'
 ]);
 
 async function proxy(request, context) {
@@ -17,7 +18,8 @@ async function proxy(request, context) {
 
   const headers = new Headers();
   request.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) headers.set(key, value);
+    const lower = key.toLowerCase();
+    if (!HOP_BY_HOP.has(lower) && lower !== 'content-length') headers.set(key, value);
   });
   headers.set('x-forwarded-host', incoming.host);
   headers.set('x-forwarded-proto', incoming.protocol.replace(':', ''));
@@ -26,26 +28,44 @@ async function proxy(request, context) {
     method: request.method,
     headers,
     redirect: 'manual',
-    cache: 'no-store'
+    cache: 'no-store',
+    signal: AbortSignal.timeout(55000)
   };
-  if (!['GET', 'HEAD'].includes(request.method)) init.body = await request.arrayBuffer();
+  // Stream uploads rather than buffering a second full copy in the function.
+  // Vercel's platform request-size limit still applies; large uploads should
+  // eventually go directly to private Supabase Storage.
+  if (!['GET', 'HEAD'].includes(request.method) && request.body) {
+    init.body = request.body;
+    init.duplex = 'half';
+  }
 
   let upstream;
   try {
     upstream = await fetch(target, init);
-  } catch {
+  } catch (error) {
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
     return NextResponse.json(
-      { error: 'Hosting backend is temporarily unavailable. Please retry shortly.' },
-      { status: 502, headers: { 'Cache-Control': 'no-store' } }
+      { error: timedOut ? 'The hosting backend took too long to respond.' : 'Hosting backend is temporarily unavailable. Please retry shortly.' },
+      { status: timedOut ? 504 : 502, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 
   const responseHeaders = new Headers();
+  const getSetCookie = upstream.headers.getSetCookie?.bind(upstream.headers);
   upstream.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase()) && key.toLowerCase() !== 'content-length') {
-      responseHeaders.append(key, value);
+    const lower = key.toLowerCase();
+    if (!HOP_BY_HOP.has(lower) && lower !== 'content-length' && lower !== 'set-cookie') {
+      responseHeaders.set(key, value);
     }
   });
+
+  // Preserve each cookie separately (session + flash/remember cookies).
+  const cookies = getSetCookie ? getSetCookie() : [];
+  for (const cookie of cookies) responseHeaders.append('set-cookie', cookie);
+  if (!cookies.length) {
+    const singleCookie = upstream.headers.get('set-cookie');
+    if (singleCookie) responseHeaders.set('set-cookie', singleCookie);
+  }
 
   const location = responseHeaders.get('location');
   if (location) {
