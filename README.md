@@ -114,13 +114,44 @@ The bottom navigation is fixed on mobile, with responsive layouts for cards, for
 | `KEEP_ALIVE_URL` | Optional public base URL for the health ping |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Private server-side Supabase service key |
-| `SUPABASE_STORAGE_BUCKET` | Storage bucket name; use `bot-files` |
+| `SUPABASE_STORAGE_BUCKET` | Storage bucket name; use `bot-files` |\n| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID |\n| `GITHUB_CLIENT_SECRET` | GitHub OAuth App secret |\n| `GITHUB_CALLBACK_URL` | `https://YOUR-SERVICE.onrender.com/github/callback` |
 
 **Important:** If an existing Render service was created with a different runtime and cannot switch to Docker, create a new Web Service using this repository's Docker configuration.
 
 ---
 
-## `05 // BOT DEPLOYMENT WORKFLOW`
+## `05 // GITHUB CONNECT & DIRECT IMPORT`
+
+Connect a GitHub OAuth App, browse repositories accessible to the signed-in GitHub account, and import a selected repository directly into CYBER HOST.
+
+### Configure GitHub OAuth
+
+1. Open GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Set Homepage URL to your deployed CYBER HOST URL.
+3. Set Authorization callback URL to `https://YOUR-SERVICE.onrender.com/github/callback`.
+4. Copy the OAuth App **Client ID** and generate a **Client Secret**.
+5. In Render → Environment, add:
+   - `GITHUB_CLIENT_ID` — OAuth App Client ID.
+   - `GITHUB_CLIENT_SECRET` — private OAuth App secret.
+   - `GITHUB_CALLBACK_URL` — exact callback URL configured in GitHub.
+6. Save and redeploy. Sign in to CYBER HOST, open **GitHub**, and select **Connect GitHub**.
+7. Approve the GitHub authorization, select a repository, then press **Import & Deploy**.
+
+The app requests `read:user` and `repo` scopes so it can list private and public repositories the account can access. The current importer only calls read/download endpoints; it does not push commits or modify repository contents. GitHub's OAuth `repo` scope is broad, so authorize only an account you control.
+
+### Import behavior and limits
+
+- The selected default branch is downloaded as a ZIP snapshot (50 MB download / 100 MB expanded limit).
+- Archive paths and symbolic links are checked before the project is saved.
+- Imported projects use the existing bot launch flow. Normal users' imports remain pending until admin approval; admin imports launch automatically.
+- This is a one-time import, not automatic redeployment after future Git pushes. Re-import the repository to update the hosted copy.
+- The access token is encrypted at rest using a key derived from the app's stable `SECRET_KEY`. Keep `SECRET_KEY` unchanged between deploys; otherwise saved GitHub connections cannot be decrypted. Disconnecting removes the saved token.
+
+Only import source code you trust: deployed Python/JavaScript projects execute inside the hosting container.
+
+---
+
+## `06 // BOT DEPLOYMENT WORKFLOW`
 
 1. Create an account and sign in.
 2. Open **Create Bot**.
@@ -139,7 +170,7 @@ Dependency installation can take time and can fail if a package is incompatible,
 
 ---
 
-## `06 // WEB TERMINAL & LIVE LOGS`
+## `07 // WEB TERMINAL & LIVE LOGS`
 
 The browser terminal has a dark, Termux-inspired interface and is intended for basic project tasks.
 
@@ -172,7 +203,7 @@ npm list
 
 ---
 
-## `07 // PERSISTENT STORAGE`
+## `08 // PERSISTENT STORAGE`
 
 Render's local filesystem is ephemeral. For persistence across instance replacement, configure Supabase Storage.
 
@@ -199,7 +230,7 @@ The app stores uploaded files under `uploads/` and a SQLite database snapshot at
 
 ---
 
-## `08 // SCOPED API ACCESS`
+## `09 // SCOPED API ACCESS`
 
 Admins can create named bearer tokens and select permissions. Tokens can be set to expire and revoked. The full token is displayed only once; the database stores its SHA-256 hash.
 
@@ -235,7 +266,7 @@ Grant only the scopes an integration needs. Never place API tokens or the Supaba
 
 ---
 
-## `09 // PAYMENTS & CREDITS`
+## `10 // PAYMENTS & CREDITS`
 
 The Store page displays active plans. Users submit a UPI transaction reference/UTR; the request remains pending until an admin checks the payment and approves or rejects it.
 
@@ -250,7 +281,7 @@ Admins can configure:
 
 ---
 
-## `10 // SECURITY & HOSTING LIMITS`
+## `11 // SECURITY & HOSTING LIMITS`
 
 > **Read before allowing public uploads.**
 
@@ -269,7 +300,7 @@ Other important limitations:
 
 ---
 
-## `11 // RUN LOCALLY`
+## `12 // RUN LOCALLY`
 
 Requirements: Python 3.12+ and Node.js/npm if you want to run JavaScript bot projects.
 
@@ -295,7 +326,7 @@ Set a strong `ADMIN_PASSWORD` and `SECRET_KEY` in your environment before using 
 
 ---
 
-## `12 // PROJECT STATUS`
+## `13 // PROJECT STATUS`
 
 | Component | Status |
 |---|---|
@@ -306,7 +337,7 @@ Set a strong `ADMIN_PASSWORD` and `SECRET_KEY` in your environment before using 
 | Web terminal and Live Logs | Included |
 | Credit plans and manual UPI review | Included |
 | Supabase Storage persistence | Optional configuration |
-| Scoped API tokens | Included |
+| Scoped API tokens | Included |\n| GitHub OAuth repository import | Requires OAuth App configuration |
 | Guaranteed 24/7 free runtime | Not guaranteed |
 | Secure isolation for untrusted public code | Requires additional infrastructure |
 
