@@ -358,7 +358,8 @@ Set a strong `ADMIN_PASSWORD` and `SECRET_KEY` in your environment before using 
 | Web terminal and Live Logs | Included |
 | Credit plans and manual UPI review | Included |
 | Supabase Storage persistence | Optional configuration |
-| Scoped API tokens | Included |\n| GitHub OAuth repository import | Requires OAuth App configuration |
+| Scoped API tokens | Included |
+| Telegram admin bot notifications and remote controls | Optional; configure and pair in Admin → Telegram Admin Bot |\n| GitHub OAuth repository import | Requires OAuth App configuration |
 | Guaranteed 24/7 free runtime | Not guaranteed |
 | Secure isolation for untrusted public code | Requires additional infrastructure |
 
