@@ -1794,7 +1794,7 @@ def _tg_call(method,payload=None,timeout=25):
         with urllib.request.urlopen(req,timeout=timeout) as x:
             out=json.loads(x.read().decode()); return out if out.get("ok") else None
     except Exception as e:
-        sys.stderr.write("[tg-admin] "+method+": "+str(e)[:160]+"\\n"); return None
+        sys.stderr.write("[tg-admin] "+method+": "+str(e)[:160]+"\n"); return None
 def _tg_notify(text,keyboard=None):
     cfg=_tg_settings(); chat=cfg.get("tg_admin_chat_id")
     if chat:
@@ -1810,32 +1810,32 @@ def _tg_send_file(bot_id):
     if not f.is_file() and _storage_enabled():_storage_download_file("uploads/"+b["filename"],f)
     if not f.is_file():_tg_notify("⚠️ File missing for bot #"+str(bot_id));return
     boundary="----CH"+secrets.token_hex(12); data=bytearray()
-    data.extend(("--"+boundary+"\\r\\nContent-Disposition: form-data; name=\\"chat_id\\"\\r\\n\\r\\n"+str(chat)+"\\r\\n").encode())
-    data.extend(("--"+boundary+"\\r\\nContent-Disposition: form-data; name=\\"caption\\"\\r\\n\\r\\nSource file for bot #"+str(bot_id)+" · "+b["name"]+"\\r\\n").encode())
-    data.extend(("--"+boundary+"\\r\\nContent-Disposition: form-data; name=\\"document\\"; filename=\\""+secure_filename(f.name)+"\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n").encode())
-    data.extend(f.read_bytes());data.extend(("\\r\\n--"+boundary+"--\\r\\n").encode())
+    data.extend(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n"+str(chat)+"\r\n").encode())
+    data.extend(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\nSource file for bot #"+str(bot_id)+" · "+b["name"]+"\r\n").encode())
+    data.extend(("--"+boundary+"\r\nContent-Disposition: form-data; name=\"document\"; filename=\""+secure_filename(f.name)+"\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode())
+    data.extend(f.read_bytes());data.extend(("\r\n--"+boundary+"--\r\n").encode())
     req=urllib.request.Request("https://api.telegram.org/bot"+_tg_token()+"/sendDocument",data=bytes(data),headers={"Content-Type":"multipart/form-data; boundary="+boundary})
     try:
         with urllib.request.urlopen(req,timeout=45):pass
-    except Exception as e:sys.stderr.write("[tg-admin] file send: "+str(e)[:160]+"\\n")
+    except Exception as e:sys.stderr.write("[tg-admin] file send: "+str(e)[:160]+"\n")
 def _tg_authorized(chat,user):
     c=_tg_settings();return str(chat)==c.get("tg_admin_chat_id") and str(user)==c.get("tg_admin_user_id")
 def _tg_list(chat,kind):
     if kind=="bots":
         with db() as c: rows=c.execute("SELECT id,name,filename,status FROM bots WHERE status IN ('pending','approved','running','error') ORDER BY id DESC LIMIT 15").fetchall()
         for b in rows:
-            _tg_call("sendMessage",{"chat_id":chat,"text":"Bot #"+str(b["id"])+" · "+b["name"]+"\\n"+b["filename"]+" · "+b["status"],"reply_markup":{"inline_keyboard":[[{"text":"Approve","callback_data":"bot:approve:"+str(b["id"])},{"text":"Reject","callback_data":"bot:reject:"+str(b["id"])}]]}})
+            _tg_call("sendMessage",{"chat_id":chat,"text":"Bot #"+str(b["id"])+" · "+b["name"]+"\n"+b["filename"]+" · "+b["status"],"reply_markup":{"inline_keyboard":[[{"text":"Approve","callback_data":"bot:approve:"+str(b["id"])},{"text":"Reject","callback_data":"bot:reject:"+str(b["id"])}]]}})
             _tg_send_file(b["id"])
     elif kind=="payments":
         with db() as c: rows=c.execute("SELECT p.id,p.utr,u.username,pl.name plan FROM payments p JOIN users u ON u.id=p.user_id JOIN plans pl ON pl.id=p.plan_id WHERE p.status='pending' ORDER BY p.id DESC LIMIT 20").fetchall()
-        for p in rows:_tg_call("sendMessage",{"chat_id":chat,"text":"Payment #"+str(p["id"])+" · "+p["username"]+" · "+p["plan"]+"\\nUTR: "+p["utr"],"reply_markup":{"inline_keyboard":[[{"text":"Approve","callback_data":"pay:approve:"+str(p["id"])},{"text":"Reject","callback_data":"pay:reject:"+str(p["id"])}]]}})
+        for p in rows:_tg_call("sendMessage",{"chat_id":chat,"text":"Payment #"+str(p["id"])+" · "+p["username"]+" · "+p["plan"]+"\nUTR: "+p["utr"],"reply_markup":{"inline_keyboard":[[{"text":"Approve","callback_data":"pay:approve:"+str(p["id"])},{"text":"Reject","callback_data":"pay:reject:"+str(p["id"])}]]}})
     elif kind=="users":
         with db() as c: rows=c.execute("SELECT id,username,credits,is_admin FROM users ORDER BY id DESC LIMIT 30").fetchall()
         for u in rows:_tg_call("sendMessage",{"chat_id":chat,"text":"#"+str(u["id"])+" · "+u["username"]+" · credits "+str(u["credits"])+(" · ADMIN" if u["is_admin"] else "")})
     elif kind=="stats":
         with db() as c:
             vals=[c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"],c.execute("SELECT COUNT(*) n FROM bots WHERE status!='deleted'").fetchone()["n"],c.execute("SELECT COUNT(*) n FROM bots WHERE status='pending'").fetchone()["n"],c.execute("SELECT COUNT(*) n FROM payments WHERE status='pending'").fetchone()["n"]]
-        _tg_call("sendMessage",{"chat_id":chat,"text":"📊 Users: "+str(vals[0])+"\\nBots: "+str(vals[1])+"\\nPending bots: "+str(vals[2])+"\\nPending payments: "+str(vals[3])})
+        _tg_call("sendMessage",{"chat_id":chat,"text":"📊 Users: "+str(vals[0])+"\nBots: "+str(vals[1])+"\nPending bots: "+str(vals[2])+"\nPending payments: "+str(vals[3])})
 def _tg_process(update):
     if "callback_query" in update:
         q=update["callback_query"];m=q.get("message",{});chat=m.get("chat",{}).get("id");user=q.get("from",{}).get("id")
@@ -1895,7 +1895,7 @@ def _tg_worker():
             for u in (result or {}).get("result",[]):
                 offset=int(u["update_id"])+1;_tg_process(u)
         except Exception as e:
-            sys.stderr.write("[tg-admin] poll error: "+str(e)[:160]+"\\n");time.sleep(4)
+            sys.stderr.write("[tg-admin] poll error: "+str(e)[:160]+"\n");time.sleep(4)
 def _tg_start():
     global _TG_STARTED
     with _TG_LOCK:
