@@ -1528,15 +1528,31 @@ def not_found(e): return render_template("error.html", code=404, message="Page n
 def too_large(e): return render_template("error.html", code=413, message="Upload too large. Maximum upload size is 25 MB."), 413
 
 def _restore_approved_bots():
-    """Re-download files and relaunch bots whose persisted state says approved/running."""
+    """Restore approved bots in a bounded, sequential queue to avoid startup OOM."""
     try:
         with db() as c:
-            rows = c.execute("SELECT * FROM bots WHERE status IN ('approved','running') ORDER BY id").fetchall()
-            # The old OS processes died with the Render instance. Mark them as
-            # approved before launching fresh processes in this instance.
+            rows = c.execute(
+                "SELECT * FROM bots WHERE status IN ('approved','running') ORDER BY id"
+            ).fetchall()
+            # Old OS processes died with the Render instance.
             c.execute("UPDATE bots SET status='approved' WHERE status='running'")
-        for row in rows:
-            threading.Thread(target=run_bot, args=(row,), name=f"restore-bot-{row['id']}", daemon=True).start()
+
+        # Dependency installation can use substantial RAM. Do not launch every
+        # saved project in parallel when a small Render instance starts.
+        try:
+            restore_limit = max(0, min(10, int(os.getenv("MAX_RESTORED_BOTS", "2"))))
+        except (TypeError, ValueError):
+            restore_limit = 2
+
+        for index, row in enumerate(rows):
+            if index >= restore_limit:
+                _write_log(row["id"], "[restore] Waiting for capacity; this bot was not auto-started.")
+                continue
+            try:
+                _write_log(row["id"], "[restore] Starting from the sequential recovery queue.")
+                run_bot(row)
+            except Exception as exc:
+                _write_log(row["id"], f"[restore] Failed: {type(exc).__name__}: {exc}")
     except Exception as exc:
         sys.stderr.write(f"[restore] could not restore bots: {type(exc).__name__}: {exc}\\n")
 
