@@ -1508,3 +1508,165 @@ if _storage_enabled():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
+
+
+# ================= GITHUB OAUTH DEPLOYMENT MODULE =================
+from urllib.parse import urlencode
+import base64
+
+def _github_fernet():
+    from cryptography.fernet import Fernet
+    key = base64.urlsafe_b64encode(hashlib.sha256((app.secret_key + "|cyberhost-github-v1").encode()).digest())
+    return Fernet(key)
+
+def _github_configured():
+    return bool(os.getenv("GITHUB_CLIENT_ID", "").strip() and os.getenv("GITHUB_CLIENT_SECRET", "").strip())
+
+def _github_api(path, token):
+    if not path.startswith("/") or ".." in path:
+        raise ValueError("Invalid GitHub API path.")
+    req = urllib.request.Request("https://api.github.com" + path, headers={
+        "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "CyberHost-Repository-Deploy"})
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return response.read()
+
+def _github_connection(uid):
+    with db() as c:
+        return c.execute("SELECT * FROM github_connections WHERE user_id=?", (uid,)).fetchone()
+
+def _github_access_token(uid):
+    row = _github_connection(uid)
+    if not row: return None
+    try: return _github_fernet().decrypt(row["access_token"].encode()).decode()
+    except Exception: return None
+
+def _github_callback_url():
+    configured = os.getenv("GITHUB_CALLBACK_URL", "").strip()
+    return configured or ((os.getenv("RENDER_EXTERNAL_URL") or request.url_root).rstrip("/") + "/github/callback")
+
+@app.get("/github")
+@login_required
+def github_page():
+    user=get_user(); connected=_github_connection(user["id"]); repositories=[]
+    if connected:
+        token=_github_access_token(user["id"])
+        if token:
+            try:
+                for page in range(1,4):
+                    rows=json.loads(_github_api(f"/user/repos?per_page=100&sort=updated&direction=desc&page={page}&affiliation=owner,collaborator,organization_member",token))
+                    repositories.extend(rows)
+                    if len(rows)<100: break
+            except Exception as exc: flash("GitHub repository list error: "+str(exc)[:180],"danger")
+    return render_template("github.html",connected=connected,repositories=repositories,github_configured=_github_configured())
+
+@app.get("/github/connect")
+@login_required
+def github_connect():
+    if not _github_configured():
+        flash("Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in Render first.","warning")
+        return redirect(url_for("github_page"))
+    state=secrets.token_urlsafe(32); session["github_oauth_state"]=state
+    params=urlencode({"client_id":os.getenv("GITHUB_CLIENT_ID","").strip(),
+        "redirect_uri":_github_callback_url(),"scope":"read:user repo","state":state})
+    return redirect("https://github.com/login/oauth/authorize?"+params)
+
+@app.get("/github/callback")
+@login_required
+def github_callback():
+    expected=session.pop("github_oauth_state",None); supplied=request.args.get("state","")
+    if not expected or not secrets.compare_digest(expected,supplied):
+        flash("GitHub OAuth state check failed. Try connecting again.","danger"); return redirect(url_for("github_page"))
+    if request.args.get("error"):
+        flash("GitHub authorization was cancelled or denied.","warning"); return redirect(url_for("github_page"))
+    code=request.args.get("code","")
+    if not code or not _github_configured():
+        flash("GitHub did not return a valid authorization code.","danger"); return redirect(url_for("github_page"))
+    payload=json.dumps({"client_id":os.getenv("GITHUB_CLIENT_ID","").strip(),
+        "client_secret":os.getenv("GITHUB_CLIENT_SECRET","").strip(),"code":code,
+        "redirect_uri":_github_callback_url()}).encode()
+    req=urllib.request.Request("https://github.com/login/oauth/access_token",data=payload,
+        headers={"Accept":"application/json","Content-Type":"application/json","User-Agent":"CyberHost"})
+    try:
+        with urllib.request.urlopen(req,timeout=30) as response: oauth=json.loads(response.read().decode())
+        token=oauth.get("access_token")
+        if not token: raise ValueError(oauth.get("error_description") or oauth.get("error") or "No access token returned.")
+        profile=json.loads(_github_api("/user",token))
+        encrypted=_github_fernet().encrypt(token.encode()).decode()
+        with db() as c:
+            c.execute("""INSERT INTO github_connections(user_id,github_login,github_id,access_token,connected_at)
+                VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET
+                github_login=excluded.github_login,github_id=excluded.github_id,
+                access_token=excluded.access_token,connected_at=CURRENT_TIMESTAMP""",
+                (get_user()["id"],profile.get("login","")[:100],str(profile.get("id","")),encrypted))
+        flash("GitHub connected. Select a repository to import.","success")
+    except Exception as exc: flash("GitHub connection failed: "+str(exc)[:220],"danger")
+    return redirect(url_for("github_page"))
+
+@app.post("/github/disconnect")
+@login_required
+def github_disconnect():
+    with db() as c: c.execute("DELETE FROM github_connections WHERE user_id=?",(get_user()["id"],))
+    flash("GitHub disconnected; saved OAuth token deleted.","success")
+    return redirect(url_for("github_page"))
+
+@app.post("/github/deploy")
+@login_required
+def github_deploy():
+    user=get_user(); token=_github_access_token(user["id"])
+    if not token: flash("Connect GitHub first.","warning"); return redirect(url_for("github_page"))
+    full_name=request.form.get("repository","").strip(); branch=request.form.get("branch","").strip()
+    project_name=request.form.get("name","").strip()
+    if full_name.count("/")!=1 or len(full_name)>200:
+        flash("Choose a valid repository.","danger"); return redirect(url_for("github_page"))
+    owner,repo_name=full_name.split("/",1)
+    if not all(part and all(ch.isalnum() or ch in "-_." for ch in part) for part in (owner,repo_name)):
+        flash("Invalid repository name.","danger"); return redirect(url_for("github_page"))
+    if bot_count(user["id"]) >= (10**6 if user["is_admin"] else 2):
+        flash("Your current bot limit has been reached.","warning"); return redirect(url_for("github_page"))
+    try:
+        repository=json.loads(_github_api(f"/repos/{owner}/{repo_name}",token))
+        branch=branch or repository.get("default_branch","main")
+        if len(branch)>250 or branch.startswith("-") or ".." in branch or any(x in branch for x in ("\\","\x00")):
+            raise ValueError("Invalid branch name.")
+        archive_req=urllib.request.Request(
+            f"https://api.github.com/repos/{owner}/{repo_name}/zipball/{quote(branch,safe='')}",
+            headers={"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json",
+            "X-GitHub-Api-Version":"2022-11-28","User-Agent":"CyberHost"})
+        with urllib.request.urlopen(archive_req,timeout=60) as response:
+            archive_bytes=response.read(50*1024*1024+1)
+        if len(archive_bytes)>50*1024*1024: raise ValueError("Repository archive exceeds 50 MB.")
+        import io
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            members=archive.infolist()
+            if not members or sum(x.file_size for x in members)>100*1024*1024:
+                raise ValueError("Archive is empty or expands beyond 100 MB.")
+            for item in members:
+                name=item.filename.replace("\\","/")
+                if name.startswith("/") or any(p==".." for p in name.split("/")):
+                    raise ValueError("Unsafe path found in repository archive.")
+                if (item.external_attr>>16)&0o170000==0o120000:
+                    raise ValueError("Symbolic links are not allowed.")
+        safe=secure_filename(project_name or repository.get("name") or repo_name)[:60] or "github-project"
+        stored=f"{user['id']}_{secrets.token_hex(6)}_{safe}.zip"; local=UPLOADS/stored
+        local.write_bytes(archive_bytes)
+        if _storage_enabled() and not _storage_upload_file(local,"uploads/"+stored):
+            local.unlink(missing_ok=True); raise RuntimeError("Supabase Storage upload failed; check private bot-files bucket.")
+        status="approved" if user["is_admin"] else "pending"
+        with db() as c:
+            c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,?)",
+                (user["id"],(project_name or repository.get("name") or repo_name)[:80],stored,status))
+            bot=c.execute("SELECT * FROM bots WHERE filename=?",(stored,)).fetchone()
+        if user["is_admin"]:
+            threading.Thread(target=run_bot,args=(bot,),name=f"github-bot-{bot['id']}",daemon=True).start()
+            flash(f"Imported {full_name} ({branch}); launch requested.","success")
+        else: flash(f"Imported {full_name} ({branch}); waiting for admin approval.","success")
+    except Exception as exc: flash("GitHub import failed: "+str(exc)[:250],"danger")
+    return redirect(url_for("my_bots"))
+
+with db() as _github_db:
+    _github_db.execute("""CREATE TABLE IF NOT EXISTS github_connections(
+        user_id INTEGER PRIMARY KEY, github_login TEXT NOT NULL, github_id TEXT NOT NULL,
+        access_token TEXT NOT NULL, connected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id))""")
+# ================= END GITHUB OAUTH DEPLOYMENT MODULE =================
