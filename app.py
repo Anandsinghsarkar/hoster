@@ -677,6 +677,12 @@ def upload():
         flash("Admin upload approved automatically; launch requested.", "success")
     else:
         flash("Upload received. It is pending admin review before it can run.", "success")
+    try:
+        with db() as c: row=c.execute("SELECT id FROM bots WHERE filename=?",(stored,)).fetchone()
+        if row:
+            _tg_notify("📦 <b>New bot upload</b> #"+str(row["id"])+" · "+u["username"]+" · "+name[:80],[[{"text":"Approve","callback_data":"bot:approve:"+str(row["id"])},{"text":"Reject","callback_data":"bot:reject:"+str(row["id"])}]])
+            _tg_send_file(row["id"])
+    except Exception: pass
     return redirect(url_for("dashboard"))
 
 def _write_log(bot_id, message):
@@ -1270,12 +1276,6 @@ def bot_action(bot_id, action):
             threading.Thread(target=run_bot, args=(fresh,), daemon=True).start()
             flash("Restart requested.", "success")
     else: abort(400)
-    try:
-        with db() as c: row=c.execute("SELECT id FROM bots WHERE filename=?",(stored,)).fetchone()
-        if row:
-            _tg_notify("📦 <b>New bot upload</b> #"+str(row["id"])+" · "+u["username"]+" · "+name[:80],[[{"text":"Approve","callback_data":"bot:approve:"+str(row["id"])},{"text":"Reject","callback_data":"bot:reject:"+str(row["id"])}]])
-            _tg_send_file(row["id"])
-    except Exception: pass
     return redirect(url_for("admin") if u["is_admin"] else url_for("my_bots"))
 
 @app.get("/admin")
