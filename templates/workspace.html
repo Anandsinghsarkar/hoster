@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block content %}
 <header class="page-heading"><div><div class="eyebrow">CYBER HOST WORKSPACE</div>
-{% set titles={'bots':'My Bots','create':'Create Bot','store':'Credit Store','payments':'Payment History','profile':'My Profile','admin_bots':'Bot Management','admin_payments':'Payment Management','admin_users':'User Management','admin_settings':'Website Settings','admin_plans':'Plans & Pricing','admin_api':'API Access','github':'GitHub Deploy'} %}
+{% set titles={'bots':'My Bots','create':'Create Bot','store':'Credit Store','payments':'Payment History','profile':'My Profile','admin_bots':'Bot Management','admin_payments':'Payment Management','admin_users':'User Management','admin_settings':'Website Settings','admin_plans':'Plans & Pricing','admin_api':'API Access','github':'GitHub Deploy','edit_code':'Edit Bot Code'} %}
 <h1>{{ titles[page] }}<span>.</span></h1><p>Manage your hosting workspace from this page.</p></div>
 {% if user is defined and user %}<div class="credit-pill"><small>AVAILABLE CREDITS</small><b>✦ {{ user['credits'] }}</b></div>{% endif %}</header>
 {% if page=='bots' or page=='admin_bots' %}
