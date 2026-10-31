@@ -1985,6 +1985,102 @@ with db() as _env_db:
 
 
 
+
+# ADMIN BOT FILE MANAGER: admin-only, with sensitive files protected.
+_FM_TEXT_EXTENSIONS = {".txt", ".json", ".py", ".js", ".md", ".log", ".csv", ".xml", ".yaml", ".yml", ".ini", ".cfg"}
+_FM_BLOCKED_PARTS = {".env", "secret", "token", "credential", "password", "passwd", "auth", "private", "cookie", "session", "api_key", "apikey", ".pem", ".key", ".p12", ".pfx"}
+
+def _fm_is_protected(rel):
+    return any(any(flag in part.lower() for flag in _FM_BLOCKED_PARTS) for part in Path(rel).parts)
+
+def _fm_root(bot_id, area):
+    if area == "runtime": return (RUNTIMES / str(bot_id)).resolve()
+    if area == "data": return (BOT_DATA / str(bot_id)).resolve()
+    abort(404)
+
+def _fm_path(root, rel):
+    rel = (rel or "").replace("\\\\", "/").strip("/")
+    if not rel or len(rel) > 500 or any(x in ("", ".", "..") for x in rel.split("/")): abort(400)
+    target = (root / rel).resolve()
+    if target != root and root not in target.parents: abort(400)
+    if _fm_is_protected(rel): abort(403)
+    return target, rel
+
+@app.get("/admin/file-manager")
+@admin_required
+def admin_file_manager():
+    with db() as c:
+        bots = c.execute("SELECT bots.id,bots.name,bots.filename,bots.status,users.username FROM bots JOIN users ON users.id=bots.user_id WHERE bots.status!='deleted' ORDER BY bots.id DESC").fetchall()
+    bot_id = request.args.get("bot_id", type=int)
+    selected = next((b for b in bots if b["id"] == bot_id), None)
+    files = []
+    note = ""
+    if selected:
+        for area, root in (("runtime", RUNTIMES / str(bot_id)), ("data", BOT_DATA / str(bot_id))):
+            if root.is_dir():
+                for current, dirs, names in os.walk(root, followlinks=False):
+                    dirs[:] = [d for d in dirs if not (Path(current) / d).is_symlink()]
+                    for name in names:
+                        p = Path(current) / name
+                        try:
+                            if p.is_symlink() or not p.is_file(): continue
+                            rel = p.relative_to(root).as_posix()
+                            files.append({"area":area,"path":rel,"size":p.stat().st_size,"protected":_fm_is_protected(rel),"source":"Local"})
+                        except OSError: pass
+        if _storage_enabled():
+            payload = _storage_request("GET", _bot_snapshot_object(bot_id))
+            if payload:
+                try:
+                    import io
+                    with zipfile.ZipFile(io.BytesIO(payload)) as z:
+                        known = {(f["area"],f["path"]) for f in files}
+                        for info in z.infolist():
+                            if info.is_dir(): continue
+                            area, rel = ("data",info.filename[len("__bot_data__/"):]) if info.filename.startswith("__bot_data__/") else ("runtime",info.filename)
+                            if rel and (area,rel) not in known:
+                                files.append({"area":area,"path":rel,"size":info.file_size,"protected":_fm_is_protected(rel),"source":"Supabase backup"})
+                    note = "Local files and saved Supabase backup inventory."
+                except Exception: note = "Could not read saved backup."
+            else: note = "No saved backup found for this bot."
+        else: note = "Supabase Storage is not configured; only local files are visible."
+    files.sort(key=lambda f:(f["area"],f["path"].lower()))
+    return render_template("admin_file_manager.html",bots=bots,selected=selected,files=files,note=note)
+
+@app.route("/admin/file-manager/<int:bot_id>/file", methods=["GET","POST"])
+@admin_required
+def admin_file_manager_file(bot_id):
+    area = request.values.get("area","data")
+    root = _fm_root(bot_id,area)
+    target, rel = _fm_path(root,request.values.get("path",""))
+    with db() as c: bot = c.execute("SELECT id,name FROM bots WHERE id=? AND status!='deleted'",(bot_id,)).fetchone()
+    if not bot: abort(404)
+    if request.method == "POST":
+        if target.suffix.lower() not in _FM_TEXT_EXTENSIONS or not target.is_file(): abort(403)
+        content = request.form.get("content","")
+        if len(content.encode("utf-8")) > 1024*1024: abort(413)
+        target.write_text(content,encoding="utf-8")
+        _snapshot_bot_runtime(bot_id)
+        flash("File saved. Restart the bot to load runtime changes.","success")
+        return redirect(url_for("admin_file_manager_file",bot_id=bot_id,area=area,path=rel))
+    if not target.is_file():
+        payload = _storage_request("GET",_bot_snapshot_object(bot_id)) if _storage_enabled() else None
+        if payload:
+            import io
+            member = ("__bot_data__/" if area=="data" else "") + rel
+            try:
+                with zipfile.ZipFile(io.BytesIO(payload)) as z:
+                    info = z.getinfo(member)
+                    if info.file_size <= 1024*1024 and Path(rel).suffix.lower() in _FM_TEXT_EXTENSIONS:
+                        target.parent.mkdir(parents=True,exist_ok=True)
+                        target.write_bytes(z.read(info))
+            except (KeyError,OSError,zipfile.BadZipFile): pass
+    if not target.is_file() or target.is_symlink(): abort(404)
+    if target.stat().st_size > 1024*1024 or target.suffix.lower() not in _FM_TEXT_EXTENSIONS: abort(403)
+    try: content = target.read_text(encoding="utf-8")
+    except (UnicodeDecodeError,OSError): abort(415)
+    return render_template("admin_file_view.html",bot=bot,area=area,path=rel,content=content)
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
