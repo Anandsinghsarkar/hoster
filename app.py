@@ -429,6 +429,8 @@ def api_bot_delete(bot_id):
     stop_process(bot_id)
     with db() as c: c.execute("UPDATE bots SET status='deleted' WHERE id=?", (bot_id,))
     shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
+    shutil.rmtree(BOT_DATA / str(bot_id), ignore_errors=True)
+    if _storage_enabled(): _storage_delete(_bot_snapshot_object(bot_id))
     try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
     except OSError: pass
     if _storage_enabled():
@@ -752,6 +754,8 @@ def edit_bot_code(bot_id):
                 raise RuntimeError("Supabase Storage update failed; old source was kept.")
             temporary.replace(source)
             shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
+            if _storage_enabled(): _storage_delete(_bot_snapshot_object(bot_id))
+            shutil.rmtree(BOT_DATA / str(bot_id), ignore_errors=True)
             with db() as c:
                 c.execute("UPDATE bots SET name=?,status=?,last_error='' WHERE id=?",
                           (new_name, "approved" if can_run else "pending", bot_id))
@@ -804,6 +808,7 @@ def stop_process(bot_id):
             proc.kill()
             proc.wait(timeout=3)
         _write_log(bot_id, f"[control] Process stopped (exit code {proc.returncode}).")
+        _snapshot_bot_runtime(bot_id)
 
 def _detect_python_packages(entry):
     """Infer a conservative set of common third-party packages for single-file uploads."""
@@ -889,6 +894,68 @@ def _run_setup_command(command, cwd, env, log, label, timeout=360):
         "package/version, incompatible Python version, or the host running out of memory."
     )
 
+
+# Per-bot automatic runtime persistence (best-effort object-store snapshots).
+BOT_DATA = DATA / "bot-data"
+BOT_DATA.mkdir(parents=True, exist_ok=True)
+_bot_snapshot_locks = {}
+_bot_snapshot_locks_guard = threading.Lock()
+def _bot_snapshot_lock(bot_id):
+    with _bot_snapshot_locks_guard: return _bot_snapshot_locks.setdefault(int(bot_id), threading.Lock())
+def _bot_snapshot_object(bot_id): return f"bot-data/{int(bot_id)}/runtime.zip"
+def _snapshot_bot_runtime(bot_id, runtime=None):
+    if not _storage_enabled(): return False
+    runtime = Path(runtime or (RUNTIMES / str(bot_id)))
+    if not runtime.is_dir(): return False
+    lock = _bot_snapshot_lock(bot_id)
+    if not lock.acquire(blocking=False): return False
+    try:
+        import io
+        buffer = io.BytesIO(); count = total = 0
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
+            for root, dirs, files in os.walk(runtime, followlinks=False):
+                dirs[:] = [d for d in dirs if d not in {"vendor", "node_modules", ".git", "__pycache__", ".pytest_cache"}]
+                for filename in files:
+                    path = Path(root) / filename
+                    try:
+                        if path.is_symlink() or not path.is_file(): continue
+                        size = path.stat().st_size
+                        if size > 25*1024*1024 or total+size > 150*1024*1024: continue
+                        archive.write(path, path.relative_to(runtime).as_posix()); total += size; count += 1
+                    except OSError: continue
+                    if count >= 10000: break
+                if count >= 10000: break
+        if not count: return False
+        ok = _storage_upload_bytes(_bot_snapshot_object(bot_id), buffer.getvalue(), "application/zip")
+        if not ok: _write_log(bot_id, "[storage] Automatic backup failed; check Supabase Storage logs.")
+        return ok
+    except Exception as exc:
+        _write_log(bot_id, f"[storage] Backup error: {type(exc).__name__}: {exc}"); return False
+    finally: lock.release()
+def _restore_bot_runtime(bot_id, runtime):
+    if not _storage_enabled(): return False
+    import io
+    payload = _storage_request("GET", _bot_snapshot_object(bot_id))
+    if payload is None: return False
+    runtime = Path(runtime); root = runtime.resolve()
+    try:
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            members = archive.infolist()
+            if len(members)>10000 or sum(x.file_size for x in members)>150*1024*1024:
+                raise ValueError("Stored bot backup exceeds restore limits.")
+            for info in members:
+                target=(runtime/info.filename).resolve()
+                if target!=root and root not in target.parents: raise ValueError("Unsafe path in stored backup.")
+                if (info.external_attr>>16)&0o170000==0o120000: raise ValueError("Symlinks are not allowed.")
+            archive.extractall(runtime)
+        _write_log(bot_id, "[storage] Previous bot data restored from automatic backup."); return True
+    except Exception as exc:
+        _write_log(bot_id, f"[storage] Backup restore failed: {type(exc).__name__}: {exc}"); return False
+def _bot_backup_loop(bot_id, runtime, proc):
+    while proc.poll() is None:
+        time.sleep(60)
+        if proc.poll() is None: _snapshot_bot_runtime(bot_id, runtime)
+
 def run_bot(bot):
     bot_id = bot["id"]
     source = UPLOADS / bot["filename"]
@@ -943,10 +1010,20 @@ def run_bot(bot):
                 entry = runtime / source.name
                 shutil.copy2(source, entry)
 
+            _restore_bot_runtime(bot_id, runtime)
+            bot_data_dir = BOT_DATA / str(bot_id)
+            bot_data_dir.mkdir(parents=True, exist_ok=True)
+            data_link = project_root / "data"
+            if not data_link.exists() and not data_link.is_symlink():
+                try: data_link.symlink_to(bot_data_dir, target_is_directory=True)
+                except OSError: pass
             env = os.environ.copy()
             env.update(_get_bot_environment(bot_id))
             env.update({
-                "HOME": str(runtime),
+                "HOME": str(bot_data_dir),
+                "BOT_DATA_DIR": str(bot_data_dir),
+                "DATA_DIR": str(bot_data_dir),
+                "PERSISTENT_DIR": str(bot_data_dir),
                 "PYTHONUNBUFFERED": "1",
                 "PYTHONPATH": os.pathsep.join(filter(None, [str(project_root), str(runtime / "vendor"), env.get("PYTHONPATH", "")])),
                 "npm_config_audit": "false",
@@ -1030,10 +1107,13 @@ def run_bot(bot):
             with db() as c:
                 c.execute("UPDATE bots SET status='running',last_error='' WHERE id=?", (bot_id,))
             log.write("[system] Process is running; stdout/stderr and exceptions are captured below.\n")
+            log.write("[storage] Automatic per-bot backup enabled (about every 60 seconds).\n")
             log.flush()
+            threading.Thread(target=_bot_backup_loop, args=(bot_id, runtime, proc), name=f"bot-backup-{bot_id}", daemon=True).start()
 
         def monitor():
             exit_code = proc.wait()
+            _snapshot_bot_runtime(bot_id, runtime)
             with process_lock:
                 if processes.get(bot_id) is proc:
                     processes.pop(bot_id, None)
@@ -1344,6 +1424,8 @@ def bot_action(bot_id, action):
         stop_process(bot_id)
         with db() as c: c.execute("UPDATE bots SET status='deleted' WHERE id=?", (bot_id,))
         shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
+        shutil.rmtree(BOT_DATA / str(bot_id), ignore_errors=True)
+        if _storage_enabled(): _storage_delete(_bot_snapshot_object(bot_id))
         try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
         except Exception: pass
         if _storage_enabled():
