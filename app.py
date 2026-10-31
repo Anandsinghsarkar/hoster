@@ -1999,7 +1999,7 @@ def _fm_root(bot_id, area):
     abort(404)
 
 def _fm_path(root, rel):
-    rel = (rel or "").replace("\\\\", "/").strip("/")
+    rel = (rel or "").replace("\\", "/").strip("/")
     if not rel or len(rel) > 500 or any(x in ("", ".", "..") for x in rel.split("/")): abort(400)
     target = (root / rel).resolve()
     if target != root and root not in target.parents: abort(400)
