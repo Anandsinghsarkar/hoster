@@ -676,6 +676,102 @@ def upload():
         flash("Upload received. It is pending admin review before it can run.", "success")
     return redirect(url_for("dashboard"))
 
+
+@app.post("/deploy-code")
+@login_required
+def deploy_code():
+    u = get_user()
+    name = request.form.get("name", "").strip()
+    language = request.form.get("language", "python").strip().lower()
+    code = request.form.get("code", "")
+    if language not in ("python", "javascript"):
+        flash("Choose Python or JavaScript.", "danger")
+        return redirect(url_for("create_bot_page"))
+    if not name or len(name) > 80 or not code.strip() or len(code.encode("utf-8")) > 1024 * 1024:
+        flash("Enter a bot name and code (maximum 1 MB).", "danger")
+        return redirect(url_for("create_bot_page"))
+    if bot_count(u["id"]) >= (10**6 if u["is_admin"] else 2):
+        flash("Your current bot limit has been reached.", "warning")
+        return redirect(url_for("create_bot_page"))
+    ext = ".py" if language == "python" else ".js"
+    safe_name = secure_filename(name)[:45] or "my-bot"
+    stored = f"{u['id']}_{secrets.token_hex(6)}_{safe_name}{ext}"
+    local = UPLOADS / stored
+    try:
+        local.write_text(code, encoding="utf-8")
+        if _storage_enabled() and not _storage_upload_file(local, "uploads/" + stored):
+            raise RuntimeError("Supabase Storage upload failed; check the private bot-files bucket.")
+        status = "approved" if u["is_admin"] else "pending"
+        with db() as c:
+            c.execute("INSERT INTO bots(user_id,name,filename,status) VALUES(?,?,?,?)", (u["id"], name, stored, status))
+            bot_id = c.execute("SELECT id FROM bots WHERE filename=?", (stored,)).fetchone()["id"]
+            bot = c.execute("SELECT * FROM bots WHERE id=?", (bot_id,)).fetchone()
+        if u["is_admin"]:
+            threading.Thread(target=run_bot, args=(bot,), name=f"code-bot-{bot_id}", daemon=True).start()
+            flash("Code bot created and launch requested.", "success")
+        else:
+            flash("Code bot submitted. It will run after admin approval.", "success")
+    except Exception as exc:
+        local.unlink(missing_ok=True)
+        if _storage_enabled():
+            _storage_delete("uploads/" + stored)
+        flash("Could not deploy code: " + str(exc)[:220], "danger")
+    return redirect(url_for("my_bots"))
+
+
+@app.route("/bot/<int:bot_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_bot_code(bot_id):
+    u = get_user()
+    with db() as c:
+        bot = c.execute("SELECT * FROM bots WHERE id=? AND status!='deleted'", (bot_id,)).fetchone()
+    if not bot or (bot["user_id"] != u["id"] and not u["is_admin"]):
+        abort(404)
+    source = UPLOADS / bot["filename"]
+    if not source.is_file() and _storage_enabled():
+        _storage_download_file("uploads/" + bot["filename"], source)
+    if source.suffix.lower() not in (".py", ".js"):
+        flash("Inline editing supports Python and JavaScript files. ZIP projects can be edited in Terminal.", "warning")
+        return redirect(url_for("bot_terminal", bot_id=bot_id))
+    if not source.is_file():
+        flash("Source file is unavailable. Check storage and try again.", "danger")
+        return redirect(url_for("my_bots"))
+    if request.method == "POST":
+        new_name = request.form.get("name", "").strip()
+        code = request.form.get("code", "")
+        if not new_name or len(new_name) > 80 or not code.strip() or len(code.encode("utf-8")) > 1024 * 1024:
+            flash("Enter a bot name and code (maximum 1 MB).", "danger")
+            return redirect(url_for("edit_bot_code", bot_id=bot_id))
+        can_run = bot["status"] in ("approved", "running", "stopped", "error") or bool(u["is_admin"])
+        stop_process(bot_id)
+        try:
+            temporary = source.with_name(source.name + ".new")
+            temporary.write_text(code, encoding="utf-8")
+            if _storage_enabled() and not _storage_upload_file(temporary, "uploads/" + bot["filename"]):
+                temporary.unlink(missing_ok=True)
+                raise RuntimeError("Supabase Storage update failed; old source was kept.")
+            temporary.replace(source)
+            shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
+            with db() as c:
+                c.execute("UPDATE bots SET name=?,status=?,last_error='' WHERE id=?",
+                          (new_name, "approved" if can_run else "pending", bot_id))
+                fresh = c.execute("SELECT * FROM bots WHERE id=?", (bot_id,)).fetchone()
+            if can_run:
+                threading.Thread(target=run_bot, args=(fresh,), name=f"edited-bot-{bot_id}", daemon=True).start()
+                flash("Code saved. Restart requested with updated source.", "success")
+            else:
+                flash("Code saved. Bot remains pending admin approval.", "success")
+            return redirect(url_for("my_bots"))
+        except Exception as exc:
+            flash("Could not save code: " + str(exc)[:220], "danger")
+    try:
+        code_text = source.read_text(encoding="utf-8")
+    except UnicodeError:
+        flash("Source file is not valid UTF-8 text.", "danger")
+        return redirect(url_for("my_bots"))
+    return render_template("workspace.html", page="edit_code", user=u, bot=bot, code_text=code_text)
+
+
 def _write_log(bot_id, message):
     LOGS.mkdir(parents=True, exist_ok=True)
     with (LOGS / f"{bot_id}.log").open("a", encoding="utf-8", errors="replace") as handle:
