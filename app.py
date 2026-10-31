@@ -906,6 +906,7 @@ def _bot_snapshot_object(bot_id): return f"bot-data/{int(bot_id)}/runtime.zip"
 def _snapshot_bot_runtime(bot_id, runtime=None):
     if not _storage_enabled(): return False
     runtime = Path(runtime or (RUNTIMES / str(bot_id)))
+    data_dir = BOT_DATA / str(bot_id)
     if not runtime.is_dir(): return False
     lock = _bot_snapshot_lock(bot_id)
     if not lock.acquire(blocking=False): return False
@@ -913,16 +914,21 @@ def _snapshot_bot_runtime(bot_id, runtime=None):
         import io
         buffer = io.BytesIO(); count = total = 0
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=3) as archive:
-            for root, dirs, files in os.walk(runtime, followlinks=False):
-                dirs[:] = [d for d in dirs if d not in {"vendor", "node_modules", ".git", "__pycache__", ".pytest_cache"}]
-                for filename in files:
-                    path = Path(root) / filename
-                    try:
-                        if path.is_symlink() or not path.is_file(): continue
-                        size = path.stat().st_size
-                        if size > 25*1024*1024 or total+size > 150*1024*1024: continue
-                        archive.write(path, path.relative_to(runtime).as_posix()); total += size; count += 1
-                    except OSError: continue
+            roots = [(runtime, "")]
+            if data_dir.is_dir(): roots.append((data_dir, "__bot_data__/"))
+            for base, prefix in roots:
+                for root, dirs, files in os.walk(base, followlinks=False):
+                    dirs[:] = [d for d in dirs if d not in {"vendor", "node_modules", ".git", "__pycache__", ".pytest_cache"}]
+                    for filename in files:
+                        path = Path(root) / filename
+                        try:
+                            if path.is_symlink() or not path.is_file(): continue
+                            size = path.stat().st_size
+                            if size > 25*1024*1024 or total+size > 150*1024*1024: continue
+                            rel = path.relative_to(base).as_posix()
+                            archive.write(path, prefix + rel); total += size; count += 1
+                        except OSError: continue
+                        if count >= 10000: break
                     if count >= 10000: break
                 if count >= 10000: break
         if not count: return False
@@ -938,17 +944,38 @@ def _restore_bot_runtime(bot_id, runtime):
     payload = _storage_request("GET", _bot_snapshot_object(bot_id))
     if payload is None: return False
     runtime = Path(runtime); root = runtime.resolve()
+    data_dir = BOT_DATA / str(bot_id); data_dir.mkdir(parents=True, exist_ok=True)
+    data_root = data_dir.resolve()
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
             members = archive.infolist()
             if len(members)>10000 or sum(x.file_size for x in members)>150*1024*1024:
                 raise ValueError("Stored bot backup exceeds restore limits.")
             for info in members:
-                target=(runtime/info.filename).resolve()
-                if target!=root and root not in target.parents: raise ValueError("Unsafe path in stored backup.")
-                if (info.external_attr>>16)&0o170000==0o120000: raise ValueError("Symlinks are not allowed.")
-            archive.extractall(runtime)
-        _write_log(bot_id, "[storage] Previous bot data restored from automatic backup."); return True
+                name = info.filename
+                if name.startswith("__bot_data__/"):
+                    target = (data_dir / name[len("__bot_data__/"):]).resolve()
+                    allowed_root = data_root
+                else:
+                    target = (runtime / name).resolve()
+                    allowed_root = root
+                if target != allowed_root and allowed_root not in target.parents:
+                    raise ValueError("Unsafe path in stored backup.")
+                if (info.external_attr>>16)&0o170000==0o120000:
+                    raise ValueError("Symlinks are not allowed.")
+            for info in members:
+                name = info.filename
+                if name.startswith("__bot_data__/"):
+                    destination = data_dir / name[len("__bot_data__/"):]
+                else:
+                    destination = runtime / name
+                if info.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                else:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(info) as source, destination.open("wb") as target_file:
+                        shutil.copyfileobj(source, target_file)
+        _write_log(bot_id, "[storage] Previous bot project and session data restored from automatic backup."); return True
     except Exception as exc:
         _write_log(bot_id, f"[storage] Backup restore failed: {type(exc).__name__}: {exc}"); return False
 def _bot_backup_loop(bot_id, runtime, proc):
