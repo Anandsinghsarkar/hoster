@@ -227,15 +227,27 @@ Render's local filesystem is ephemeral. For persistence across instance replacem
 4. Save and redeploy.
 5. Check Render logs for `[supabase-storage]` errors.
 
-The app stores uploaded files under `uploads/` and a SQLite database snapshot at `_system/hosting.db`. On restart, it attempts to restore the snapshot, rehydrate uploads and relaunch bots with saved approved/running status.
+The app stores uploaded files under `uploads/` and a SQLite database snapshot at `_system/hosting.db`. On restart, it attempts to restore the database, rehydrate uploads and relaunch approved/running bots.
+
+### Automatic per-bot data backup
+
+- Every bot receives its own private server-side data directory automatically.
+- The bot process receives `BOT_DATA_DIR`, `DATA_DIR` and `PERSISTENT_DIR` environment variables pointing to that directory. A `data/` folder is also linked into the project when the host filesystem permits it.
+- The project runtime is snapshotted to the private Supabase bucket about once per minute, and again when the process exits or is stopped.
+- On the next start, the latest available snapshot is restored before the bot launches. This also preserves ordinary relative-path files written in the project folder.
+- Dependency/cache folders such as `vendor`, `node_modules`, `.git` and Python bytecode caches are excluded and rebuilt as needed.
+- Snapshots have safety limits (10,000 files; up to 150 MB total; individual files up to 25 MB). Files beyond these limits are skipped.
+- Deleting a bot removes its backup object. Editing a single-file bot clears its old runtime snapshot so stale source does not overwrite the new code.
 
 ### Storage architecture limits
 
-- The database is stored as a SQLite snapshot object in Supabase Storage; this is **not** a Supabase Postgres database migration.
+- The database and bot runtime are stored as object snapshots in Supabase Storage; this is **not** a live network filesystem or a Supabase Postgres migration.
+- Backups are best-effort and periodic. A sudden crash or forced host kill can lose changes made since the last successful backup interval.
+- Some applications keep session state only in memory or in an external database; the hosting panel cannot create a valid Telegram/library session on their behalf. The bot must write its session/data to disk or an external database.
 - Use one app instance only. Do not scale this snapshot-based design across multiple web instances.
-- Runtime folders, dependency caches and logs are local and may be rebuilt or lost after restart.
-- Without Supabase, local uploads and database files may disappear when the host replaces its ephemeral filesystem.
-- Snapshot upload/download failures must be investigated in Render logs; persistence is not guaranteed until verified.
+- Without Supabase, local runtime and database files may disappear when the host replaces its ephemeral filesystem.
+- Uploaded code runs in the same host container; per-bot folders are organizational separation, not a hardened security sandbox. Only host code you trust until isolated worker containers are implemented.
+- Check Render logs for `[supabase-storage]` and `[storage]` errors. Verify backups after deployment before relying on them for important session data.
 
 ---
 
