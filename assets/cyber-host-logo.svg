@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" role="img" aria-labelledby="title desc">
+<title id="title">CYBER HOST logo</title><desc id="desc">A blue and violet shield containing a terminal symbol, beside the CYBER HOST wordmark.</desc>
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#00D4FF"/><stop offset="1" stop-color="#7657FF"/></linearGradient><filter id="s"><feGaussianBlur stdDeviation="8"/></filter></defs>
+<rect width="720" height="220" rx="28" fill="#080D1B"/>
+<circle cx="112" cy="110" r="72" fill="#00CFFF" opacity=".18" filter="url(#s)"/>
+<path d="M112 28 177 52v51c0 44-27 73-65 91-38-18-65-47-65-91V52z" fill="url(#g)"/>
+<path d="m83 91 22 19-22 19m39 0h29" fill="none" stroke="#07101F" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="215" y="108" fill="#F4F8FF" font-family="Arial,Helvetica,sans-serif" font-size="58" font-weight="800" letter-spacing="2">CYBER HOST</text>
+<text x="219" y="148" fill="#8EA4C8" font-family="Arial,Helvetica,sans-serif" font-size="19" font-weight="600" letter-spacing="4">BOT HOSTING • CONTROL • MONITORING</text>
+<rect x="218" y="170" width="180" height="4" rx="2" fill="url(#g)"/>
+</svg>
