@@ -19,57 +19,6 @@
 
 ---
 
-## 🎥 वीडियो ट्यूटोरियल — वेबसाइट कैसे इस्तेमाल करें (हिंदी में)
-
-<!-- FILL: video record karke YouTube pe upload karo, phir neeche wala block uncomment karo aur VIDEO_ID badlo.
-[![CYBER HOST Hindi Tutorial](https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg)](https://youtu.be/VIDEO_ID)
--->
-
-### 📖 स्टेप-बाय-स्टेप गाइड
-
-**1️⃣ अकाउंट बनाएं**
-- नीचे दिए गए लिंक से वेबसाइट खोलें।
-- **Get started** दबाकर **Register** करें और फिर **Sign in** करें।
-
-**2️⃣ डैशबोर्ड समझें**
-- **My Bots** — आपके सभी बॉट और उनका स्टेटस (Running / Stopped)।
-- **Create Bot** — नया बॉट अपलोड करने के लिए।
-- **Credit Store** — क्रेडिट प्लान खरीदने के लिए।
-- **Payment History** — आपके पेमेंट रिक्वेस्ट देखने के लिए।
-- **My Profile** — अकाउंट की जानकारी और Sign out।
-
-**3️⃣ अपना पहला बॉट डालें**
-- **Create Bot** खोलें।
-- बॉट का नाम लिखें और `.py`, `.js` या `.zip` फाइल चुनें (या कोड सीधे पेस्ट करें)।
-- अपने बॉट के Environment Variables भरें, जैसे `BOT_TOKEN`। टोकन किसी के साथ शेयर न करें।
-- **Upload Project** दबाएं।
-- आम यूज़र के बॉट को पहले एडमिन अप्रूव करता है। अप्रूव होने के बाद ही बॉट चलेगा।
-
-**4️⃣ बॉट को कंट्रोल करें**
-- **My Bots** में जाकर **Restart** से बॉट चालू करें, **Stop** से बंद करें।
-- **Live Logs** में बॉट का आउटपुट और एरर दिखते हैं। बॉट न चले तो पहले लॉग देखें।
-- **Terminal** से फाइल देखें और ज़रूरी पैकेज इंस्टॉल करें।
-- सिंगल फाइल बॉट का कोड बदलना हो तो **Edit Code** दबाएं।
-
-**5️⃣ क्रेडिट कैसे खरीदें**
-- **Credit Store** खोलें और अपना प्लान चुनें।
-- वेबसाइट पर दिए UPI ID या QR से पेमेंट करें।
-- पेमेंट के बाद मिला **UTR / Reference नंबर** फॉर्म में डालें और **Submit Payment** दबाएं।
-- एडमिन वेरिफाई करेगा, उसके बाद क्रेडिट आपके अकाउंट में जुड़ जाएंगे। स्टेटस **Payment History** में देखें।
-
-**6️⃣ GitHub से बॉट डिप्लॉय करें**
-- **GitHub** टैब खोलें और अपना अकाउंट कनेक्ट करें।
-- रिपॉजिटरी चुनें, Environment Variables भरें और इम्पोर्ट करें।
-- कोड अपडेट करने पर दोबारा इम्पोर्ट करना पड़ता है, यह अपने आप सिंक नहीं होता।
-
-> ⏳ **ध्यान दें:** फ्री होस्टिंग पर वेबसाइट कुछ देर बाद सो जाती है, इसलिए पहली बार खुलने में 30–60 सेकंड लग सकते हैं। थोड़ा इंतज़ार करें।
-
-### 🌐 वेबसाइट लिंक
-
-## 👉 [https://hoster-1-1qzm.onrender.com/](https://hoster-1-1qzm.onrender.com/)
-
----
-
 ## ✨ Welcome to CYBER HOST
 
 CYBER HOST is a web-based Telegram bot hosting and management platform. Users can create an account, upload or paste bot code, manage deployments, view logs and work with supported project files. Administrators can review submissions, manage users and credits, process payments, configure website settings and inspect bot storage.
