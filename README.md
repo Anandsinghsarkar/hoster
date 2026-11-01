@@ -1,376 +1,233 @@
 <div align="center">
 
-# ☠️ CYBER HOST // BOT DEPLOYMENT SYSTEM
+# CYBER HOST
 
-### `FREE PYTHON • JAVASCRIPT • ZIP TELEGRAM BOT HOSTING`
+### TELEGRAM BOT HOSTING & MANAGEMENT PLATFORM
 
-`[ SYSTEM ONLINE ]` · `[ ANDROID READY ]` · `[ OPEN SOURCE PANEL ]`
+**Deploy • Manage • Monitor • Control**
 
-**Upload. Configure. Launch. Monitor.**
+A modern, mobile-friendly hosting dashboard for managing Python, JavaScript and ZIP-based Telegram bot projects. Upload your bot, configure its environment, monitor its activity and manage its stored files from one place — including on Android.
 
-A dark, cyberpunk-inspired Telegram bot hosting dashboard built with Flask. Manage Python, JavaScript and ZIP bot projects from a clean mobile-first control panel — including from Android.
-
-[Features](#-core-features) · [Deploy](#-quick-deploy) · [Android UI](#-mobile--android-control-panel) · [Storage](#-persistent-storage) · [API](#-scoped-api-access) · [Security](#-security--hosting-limits)
+**PYTHON** · **JAVASCRIPT** · **ZIP PROJECTS** · **LIVE LOGS** · **ADMIN CONTROL** · **PERSISTENT STORAGE**
 
 </div>
 
 ---
 
-## `01 // SYSTEM OVERVIEW`
+## Welcome to CYBER HOST
 
-CYBER HOST is a self-hostable bot management panel designed to make bot deployment simple.
+CYBER HOST makes bot hosting easier through a single website. Users can create an account, deploy supported bot projects, check bot status and view logs. Administrators can review deployments, manage users and credits, handle payments, configure the website and inspect bot files.
 
-- 🐍 **Python bot hosting** — upload `.py` files or ZIP projects.
-- 🟨 **JavaScript bot hosting** — upload `.js` files or ZIP projects with `package.json`.
-- 📦 **ZIP project hosting** — deploy project folders containing entry files and dependency manifests.
-- 📱 **Android-friendly dashboard** — separate pages, responsive cards and fixed bottom navigation.
-- 🖥️ **Browser terminal** — Termux-inspired, restricted per-project command interface.
-- 📡 **Live logs** — inspect bot output and startup errors.
-- 🛡️ **Admin approval** — review user uploads before launch.
-- 💳 **Credits and manual UPI payments** — configurable plans and admin verification.
-- 🔑 **Scoped API tokens** — issue and revoke tokens with selected permissions.
+The website uses a responsive interface, so its main features can be used from a mobile browser without desktop mode.
 
-> **Hosting note:** The panel code is free to self-host. Actual runtime capacity, uptime, storage and free-tier limits depend on the hosting provider. This project does not promise unlimited or guaranteed 24/7 hosting.
+## 1. Getting Started
 
----
+### Create an account
+1. Open the CYBER HOST website.
+2. Select **Register**.
+3. Enter your username and password.
+4. Sign in to open your dashboard.
 
-## `02 // CORE FEATURES`
+### User dashboard
 
-| Module | Capabilities |
+| Section | What you can do |
 |---|---|
-| Python runtime | Run `.py` projects; install dependencies from `requirements.txt` |
-| JavaScript runtime | Run `.js` projects; install dependencies from `package.json` |
-| ZIP deployment | Extract supported projects and detect entry files |
-| Bot controls | Start, stop, restart, approve and delete |
-| Live logs | View process output and recent startup diagnostics |
-| Web terminal | Restricted commands for project files and dependencies |
-| User accounts | Registration, login and persistent session cookie |
-| Admin console | Manage bots, users, payments, plans, settings and API tokens |
-| Credit store | Display packages and submit UPI/UTR payment references |
-| Storage | Optional Supabase Storage for uploaded files and database snapshots |
+| **My Bots** | View deployed bots, statuses and available actions. |
+| **Create Bot** | Deploy by pasting code or uploading a project. |
+| **Credit Store** | View plans and submit a payment reference. |
+| **Payment History** | Check submitted payment requests. |
+| **My Profile** | View account details and sign out. |
 
-### Supported upload formats
+## 2. Deploy a Bot
 
-- `.py` — single Python bot file.
-- `.js` — single JavaScript bot file.
-- `.zip` — project archive. Python projects can include `requirements.txt`; JavaScript projects can include `package.json`.
+CYBER HOST supports:
 
-Manual file uploads (`.py`, `.js`, `.zip`) also include an **Environment Variables** editor. Add keys such as `BOT_TOKEN`, `API_ID`, `API_HASH`, or `MONGO_URI` before uploading. Up to 50 variables are accepted, each value up to 4,000 characters. Values are encrypted at rest and loaded into the bot process on every start. Keep the same stable `SECRET_KEY` so saved values remain decryptable.
+- **Python (.py)** — Python Telegram bots.
+- **JavaScript (.js)** — Node.js Telegram bots.
+- **ZIP (.zip)** — projects containing multiple files, source code and dependency information.
 
-For best results, keep one clear entry file in the project. For ZIP projects, include the correct dependency manifest and entry script.
+### Option A — Paste code
+1. Open **Create Bot**.
+2. Find **Deploy with pasted code**.
+3. Enter a bot name.
+4. Select Python or JavaScript.
+5. Paste the source code.
+6. Press **Deploy Code**.
 
----
+### Option B — Upload a project
+1. Open **Create Bot**.
+2. Enter a project name.
+3. Select a supported .py, .js or .zip file.
+4. Add any required environment variables.
+5. Press **Upload Project**.
 
-## `03 // MOBILE & ANDROID CONTROL PANEL`
+### Environment Variables
+Environment variables let your bot read configuration values without placing them directly in its source code. Examples include BOT_TOKEN, API_ID, API_HASH and MONGO_URI.
 
-The interface is designed to work on phone screens without needing desktop mode.
+- Enter the exact variable names expected by your bot.
+- Values are encrypted before being saved by the website.
+- Values are supplied to the bot when it starts.
+- Keep credentials private. Never share screenshots or source files containing live secrets.
 
-### User navigation
+### After deployment
+- An administrator's own upload is approved automatically.
+- A normal user's upload is marked **Pending**.
+- An administrator reviews the submission and approves or rejects it.
+- After approval, the bot can be started from the bot controls.
 
-- **Dashboard** — account overview and quick links.
-- **My Bots** — view and manage uploaded projects.
-- **Create Bot** — upload a new Python, JS or ZIP project.
-- **Credit Store** — view plans and submit payment references.
-- **My Profile** — account information and sign-out.
+## 3. Manage Your Bots
 
-### Admin navigation
+Open **My Bots** to see your projects. Depending on the bot's status, available controls may include:
 
-- **Admin Dashboard** — platform overview.
-- **Bot Management** — review and control hosted projects.
-- **Payment Management** — approve or reject payment requests.
-- **User Management** — inspect users and adjust credits.
-- **Website Settings** — configure site name, UPI, QR and support text.
-- **Plans & Pricing** — edit available credit packages.
-- **API Access** — create, inspect and revoke API tokens.
-
-The bottom navigation is fixed on mobile, with responsive layouts for cards, forms and action buttons.
-
----
-
-## `04 // QUICK DEPLOY`
-
-### Deploy on Render
-
-1. Fork or push this repository to your GitHub account.
-2. Open Render and create a **New Web Service** connected to this repository.
-3. Use the included **Dockerfile** / Docker runtime. The image installs Python and Node.js.
-4. Add the environment variables below.
-5. Deploy and open your service URL.
-6. Visit `/login` and sign in with your configured admin credentials.
-
-### Required environment variables
-
-| Variable | Value |
+| Button / Feature | Purpose |
 |---|---|
-| `SECRET_KEY` | Strong random secret; keep it private and stable |
-| `ADMIN_USERNAME` | Admin login name; defaults to `admin` |
-| `ADMIN_PASSWORD` | Set a strong admin password before deployment |
+| **Start / Restart** | Launch the bot process or restart it. |
+| **Stop** | Stop a running bot. |
+| **Terminal** | Open the browser-based project command interface. |
+| **Live Logs** | Inspect recent output and error messages. |
+| **Edit Code** | Edit supported single-file Python or JavaScript bots. |
+| **Delete** | Remove the bot and its associated stored files. |
 
-### Optional environment variables
+### Edit Bot Code
+For supported .py and .js bots, use **Edit Code** to update the source and bot name. Saving updates the stored source. If the bot was already approved, the website attempts to restart it with the updated code.
 
-| Variable | Purpose |
+ZIP projects are managed through their project files and terminal workflow rather than the single-file code editor.
+
+## 4. Terminal & Live Logs
+
+### Terminal
+The browser terminal provides a mobile-friendly interface for selected project tasks, such as viewing files, checking runtime versions and installing supported dependencies.
+
+It is a restricted project tool, not a complete Linux shell or unrestricted Termux replacement. Only commands supported by the website are available.
+
+### Live Logs
+Open **Live Logs** to inspect recent bot output. Logs can help identify:
+- Invalid bot configuration.
+- Missing environment variables.
+- Python or Node.js dependency errors.
+- Startup exceptions.
+- Runtime errors printed by the bot.
+
+If a bot does not start, review its latest logs, correct the reported issue and restart it.
+
+## 5. Automatic Bot Data & Persistent Storage
+
+CYBER HOST provides a separate data location for each bot so supported files created by a bot can be retained between restarts.
+
+### How it works
+1. The website creates a bot-specific data directory automatically.
+2. The bot receives directory locations through the BOT_DATA_DIR, DATA_DIR and PERSISTENT_DIR environment variables.
+3. The website periodically creates a backup of the bot's runtime files and data.
+4. When the bot starts again, the website attempts to restore the latest available backup.
+5. Each bot's data is stored separately at the application level.
+
+This can help preserve locally stored application data and supported session files. The bot or library must actually write its data to disk; information held only in memory cannot be preserved by a file backup.
+
+**Important:** Persistent backups require the website's Supabase Storage integration to be configured correctly. Backups are periodic and best-effort, not instant real-time synchronization. A sudden crash can cause changes made after the last successful backup to be lost. File-size and file-count limits apply. Test restore behavior before relying on it for important data.
+
+## 6. Credit Store & Payments
+
+The **Credit Store** displays plans made available by the administrator.
+
+### Submit a payment request
+1. Open **Credit Store**.
+2. Review the available plan and price.
+3. Follow the payment details displayed on the website.
+4. Complete the payment using your payment application.
+5. Enter the transaction UTR/reference in the payment form.
+6. Submit the request.
+
+Your request appears in **Payment History**. Credits are added after an administrator checks and approves the payment. Submitting a UTR does not mean the payment has already been approved.
+
+## 7. Admin Panel
+
+Only accounts with administrator permission can open the admin pages.
+
+| Admin section | What it does |
 |---|---|
-| `DATA_DIR` | Local app data directory; Render config uses `/tmp/cyberhost-data` |
-| `KEEP_ALIVE_ENABLED` | Enables best-effort health ping when set to `true` |
-| `KEEP_ALIVE_INTERVAL_MINUTES` | Ping interval; supported range is 5–14 minutes |
-| `KEEP_ALIVE_URL` | Optional public base URL for the health ping |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_SERVICE_KEY` | Private server-side Supabase service key |
-| `SUPABASE_STORAGE_BUCKET` | Storage bucket name; use `bot-files` |\n| `GITHUB_CLIENT_ID` | GitHub OAuth App Client ID |\n| `GITHUB_CLIENT_SECRET` | GitHub OAuth App secret |\n| `GITHUB_CALLBACK_URL` | `https://YOUR-SERVICE.onrender.com/github/callback` |
+| **Bot Management** | View hosted bots and owners, review pending submissions, approve or reject bots. |
+| **Bot File Manager** | Browse available runtime and persistent-data files for individual bots. |
+| **Payment Management** | Review payment references and approve or reject requests. |
+| **User Management** | View registered accounts and adjust user credits. |
+| **Website Settings** | Update site name, UPI details, payment QR and support text. |
+| **Plans & Pricing** | Add plans, update prices and credits, activate or deactivate plans. |
+| **API Access** | Create scoped API tokens, review permissions and revoke tokens. |
 
-**Important:** If an existing Render service was created with a different runtime and cannot switch to Docker, create a new Web Service using this repository's Docker configuration.
+### Admin Bot File Manager
+1. Open **Admin Panel → Bot Management**.
+2. Press **Bot File Manager**.
+3. Select the bot you want to inspect.
+4. Browse its available runtime and data files.
+5. Open a supported text file to preview or edit it.
+6. Save changes when required. Restart the bot if a runtime file needs to be reloaded.
 
----
+The file manager can include local files available on the current instance and files indexed from the saved Supabase backup. Credential-like files — including files associated with passwords, tokens, private keys or sessions — are protected from browser preview and editing to reduce accidental exposure.
 
-## `05 // GITHUB CONNECT & DIRECT IMPORT`
+The file manager is not a live remote desktop or a full storage console. What appears depends on the bot's available files and the latest successful backup.
 
-Connect a GitHub OAuth App, browse repositories accessible to the signed-in GitHub account, and import a selected repository directly into CYBER HOST.
+## 8. API Access
 
-### Configure GitHub OAuth
+Administrators can create API tokens for approved integrations. Each token can have selected permissions, an expiry period and can be revoked from the Admin API page.
 
-1. Open GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App**.
-2. Set Homepage URL to your deployed CYBER HOST URL.
-3. Set Authorization callback URL to `https://YOUR-SERVICE.onrender.com/github/callback`.
-4. Copy the OAuth App **Client ID** and generate a **Client Secret**.
-5. In Render → Environment, add:
-   - `GITHUB_CLIENT_ID` — OAuth App Client ID.
-   - `GITHUB_CLIENT_SECRET` — private OAuth App secret.
-   - `GITHUB_CALLBACK_URL` — exact callback URL configured in GitHub.
-6. Save and redeploy. Sign in to CYBER HOST, open **GitHub**, and select **Connect GitHub**.
-7. Approve the GitHub authorization, select a repository, then press **Import & Deploy**.
+Available permission groups:
 
-The app requests `read:user` and `repo` scopes so it can list private and public repositories the account can access. The current importer only calls read/download endpoints; it does not push commits or modify repository contents. GitHub's OAuth `repo` scope is broad, so authorize only an account you control.
+- **site:read** — read selected website settings.
+- **users:read** — list registered users.
+- **bots:read** — read bot details and statuses.
+- **bots:control** — approve, reject, stop or restart bots.
+- **bots:delete** — delete bots.
+- **payments:read** — read payment requests.
 
-### Import behavior and limits
+API requests use a bearer token in the Authorization header. Keep tokens private and grant only the permissions an integration needs. The complete token is shown only when it is created.
 
-- The selected default branch is downloaded as a ZIP snapshot (50 MB download / 100 MB expanded limit).
-- Archive paths and symbolic links are checked before the project is saved.
-- Imported projects use the existing bot launch flow. Normal users' imports remain pending until admin approval; admin imports launch automatically.
-- This is a one-time import, not automatic redeployment after future Git pushes. Re-import the repository to update the hosted copy.
-- The access token is encrypted at rest using a key derived from the app's stable `SECRET_KEY`. Keep `SECRET_KEY` unchanged between deploys; otherwise saved GitHub connections cannot be decrypted. Disconnecting removes the saved token.
+## 9. GitHub Import
 
-### Per-bot environment variables
+If GitHub connection has been configured for the website, users can connect their GitHub account and import a repository they are authorized to access.
 
-When importing a GitHub repository, expand **Add environment variables** and enter the exact names your code reads, for example `BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`, `API_ID`, `API_HASH`, or `MONGO_URI`. Add as many as needed (maximum 50; each value up to 4,000 characters). The importer encrypts these values at rest in the database and injects them only into that bot's process. They are not printed in logs or displayed again after submission. Restart/redeploy the bot after changing environment values.
+1. Open **Create Bot** and choose **Connect GitHub**.
+2. Authorize the GitHub connection.
+3. Select a repository and branch.
+4. Add environment variables required by the project.
+5. Start the import.
 
-GitHub connection remains saved to the CYBER HOST account until the user explicitly disconnects it. It survives browser logout and server restarts only when the database snapshot persistence is configured and the same stable `SECRET_KEY` is retained. GitHub repository listing is paginated (up to 10,000 repositories per account view).
+Imported projects follow the website's normal approval process. A repository import is a copy of the selected branch at that time; it does not automatically sync every later GitHub commit. Re-import the repository to bring in newer code.
 
+## 10. How the Website Works
 
-Only import source code you trust: deployed Python/JavaScript projects execute inside the hosting container.
+The usual workflow is:
 
----
+**Register → Deploy → Admin Review → Start Bot → Monitor Logs → Save Data → Manage**
 
-## `06 // BOT DEPLOYMENT WORKFLOW`
+- Users create an account and submit a supported bot project.
+- The website stores the uploaded project and its deployment details.
+- Normal user uploads wait for administrator approval.
+- Once approved, the hosting service launches the bot process.
+- Users monitor status and output through the website.
+- The persistence feature periodically backs up supported runtime and data files when Supabase Storage is configured.
+- Administrators manage users, bots, payments, plans, website settings and API permissions from the admin panel.
 
-1. Create an account and sign in.
-2. Open **Create Bot**.
-3. Enter a project name and upload a `.py`, `.js` or `.zip` file.
-4. Admin uploads are marked approved automatically. Normal user uploads remain pending until an admin reviews them.
-5. Once approved, use the bot controls to start the project.
-6. Open **Terminal** for supported project commands or **Live Logs** to inspect process output.
+## 11. Important Usage & Hosting Notes
 
-### Dependency setup
-
-- Python ZIP projects: dependencies are installed from `requirements.txt`.
-- Single Python files: the app attempts limited detection of common libraries.
-- JavaScript ZIP projects: `npm install` is run when `package.json` exists; the app uses its start script or a detected JS entry file.
-
-Dependency installation can take time and can fail if a package is incompatible, unavailable, or exceeds the host's resources. Check the final lines in Live Logs for the actual error.
-
----
-
-## `07 // WEB TERMINAL & LIVE LOGS`
-
-The browser terminal has a dark, Termux-inspired interface and is intended for basic project tasks.
-
-Supported commands include:
-
-```text
-help
-pwd
-ls
-cat <file>
-python --version
-python <file.py>
-python -m py_compile <file.py>
-pip list
-pip install <package>
-pip install -r requirements.txt
-node --version
-node <file.js>
-node --check <file.js>
-npm --version
-npm list
-```
-
-- Python packages installed from the terminal go into the selected bot's local `vendor` folder.
-- Script execution and dependency installation have time limits.
-- Terminal history is stored in the browser's local storage (up to 40 entries per bot).
-- Live Logs refreshes the selected bot's process output.
-
-**Terminal limitation:** This is not a full Linux shell or unrestricted Termux. Arbitrary shell commands, shell operators, system administration commands and paths outside the project are not supported. The terminal does not attach to the running bot's stdin. Use the website's bot controls to start or restart the bot, and Live Logs to inspect its output.
-
----
-
-## `08 // PERSISTENT STORAGE`
-
-Render's local filesystem is ephemeral. For persistence across instance replacement, configure Supabase Storage.
-
-### Supabase setup
-
-1. Open your Supabase project.
-2. Create a **private Storage bucket** named `bot-files`.
-3. In Render → Environment, add:
-   - `SUPABASE_URL` — Supabase project URL.
-   - `SUPABASE_SERVICE_KEY` — server-side service-role/secret key.
-   - `SUPABASE_STORAGE_BUCKET` — `bot-files`.
-4. Save and redeploy.
-5. Check Render logs for `[supabase-storage]` errors.
-
-The app stores uploaded files under `uploads/` and a SQLite database snapshot at `_system/hosting.db`. On restart, it attempts to restore the database, rehydrate uploads and relaunch approved/running bots.
-
-### Automatic per-bot data backup
-
-- Every bot receives its own private server-side data directory automatically.
-- The bot process receives `BOT_DATA_DIR`, `DATA_DIR` and `PERSISTENT_DIR` environment variables pointing to that directory. A `data/` folder is also linked into the project when the host filesystem permits it.
-- The project runtime is snapshotted to the private Supabase bucket about once per minute, and again when the process exits or is stopped.
-- On the next start, the latest available snapshot is restored before the bot launches. This also preserves ordinary relative-path files written in the project folder.
-- Dependency/cache folders such as `vendor`, `node_modules`, `.git` and Python bytecode caches are excluded and rebuilt as needed.
-- Snapshots have safety limits (10,000 files; up to 150 MB total; individual files up to 25 MB). Files beyond these limits are skipped.
-- Deleting a bot removes its backup object. Editing a single-file bot clears its old runtime snapshot so stale source does not overwrite the new code.
-
-### Storage architecture limits
-
-- The database and bot runtime are stored as object snapshots in Supabase Storage; this is **not** a live network filesystem or a Supabase Postgres migration.
-- Backups are best-effort and periodic. A sudden crash or forced host kill can lose changes made since the last successful backup interval.
-- Some applications keep session state only in memory or in an external database; the hosting panel cannot create a valid Telegram/library session on their behalf. The bot must write its session/data to disk or an external database.
-- Use one app instance only. Do not scale this snapshot-based design across multiple web instances.
-- Without Supabase, local runtime and database files may disappear when the host replaces its ephemeral filesystem.
-- Uploaded code runs in the same host container; per-bot folders are organizational separation, not a hardened security sandbox. Only host code you trust until isolated worker containers are implemented.
-- Check Render logs for `[supabase-storage]` and `[storage]` errors. Verify backups after deployment before relying on them for important session data.
-
----
-
-## `09 // SCOPED API ACCESS`
-
-Admins can create named bearer tokens and select permissions. Tokens can be set to expire and revoked. The full token is displayed only once; the database stores its SHA-256 hash.
-
-### Authentication
-
-Send the token from a trusted backend:
-
-```http
-Authorization: Bearer ch_live_YOUR_TOKEN
-```
-
-### API permissions
-
-| Scope | Endpoint access |
-|---|---|
-| No scope | `GET /api/v1` — API discovery |
-| Any valid token | `GET /api/v1/me` |
-| `site:read` | `GET /api/v1/settings` |
-| `users:read` | `GET /api/v1/users` |
-| `bots:read` | `GET /api/v1/bots`, `GET /api/v1/bots/<id>` |
-| `bots:control` | Approve, reject, stop or restart bot actions |
-| `bots:delete` | `DELETE /api/v1/bots/<id>` |
-| `payments:read` | `GET /api/v1/payments` |
-
-Example:
-
-```bash
-curl -H "Authorization: Bearer ch_live_YOUR_TOKEN" \
-  https://YOUR-HOST/api/v1/bots
-```
-
-Grant only the scopes an integration needs. Never place API tokens or the Supabase service key in frontend JavaScript, public repositories or screenshots.
-
----
-
-## `10 // PAYMENTS & CREDITS`
-
-The Store page displays active plans. Users submit a UPI transaction reference/UTR; the request remains pending until an admin checks the payment and approves or rejects it.
-
-Admins can configure:
-- UPI ID.
-- Payment QR image URL or uploaded QR image.
-- Support text and site name.
-- Credit plans and package values.
-- User credit adjustments.
-
-**Payment verification is manual.** This project does not automatically verify bank transfers or provide a built-in live payment gateway. Do not mark a payment approved until it has been checked independently.
-
----
-
-## `11 // SECURITY & HOSTING LIMITS`
-
-> **Read before allowing public uploads.**
-
-This is a starter hosting panel, not a hardened multi-tenant code execution platform. Uploaded Python and JavaScript code runs as child processes inside the app's host environment. Uploaded code may access files and network resources available to that container.
-
-For a public service, add isolated worker containers, strict CPU/RAM/process/time/network limits, per-user quotas, malware review, audit logs and security testing before accepting untrusted uploads.
-
-Other important limitations:
-
-- Free hosting providers can restart or suspend services.
-- Self-pinging is best-effort and cannot guarantee 24/7 uptime.
-- A bot that crashes because of invalid credentials, code errors or incompatible dependencies will not be automatically repaired by restarting it.
-- Manual UPI review is not automated payment verification.
-- This starter does not include Google OAuth or a live payment gateway.
-- Keep `SECRET_KEY`, `ADMIN_PASSWORD` and `SUPABASE_SERVICE_KEY` private.
-
----
-
-## `12 // RUN LOCALLY`
-
-Requirements: Python 3.12+ and Node.js/npm if you want to run JavaScript bot projects.
-
-```bash
-git clone https://github.com/Anandsinghsarkar/hoster.git
-cd hoster
-
-python -m venv .venv
-
-# Linux / macOS
-source .venv/bin/activate
-
-# Windows PowerShell
-# .venv\Scripts\Activate.ps1
-
-pip install -r requirements.txt
-python app.py
-```
-
-Open `http://127.0.0.1:10000`.
-
-Set a strong `ADMIN_PASSWORD` and `SECRET_KEY` in your environment before using the panel. Never use a sample/default password on a public deployment.
-
----
-
-## `13 // PROJECT STATUS`
-
-| Component | Status |
-|---|---|
-| Flask web dashboard | Included |
-| Python / JavaScript / ZIP uploads | Included |
-| Admin review and bot controls | Included |
-| Mobile bottom navigation | Included |
-| Web terminal and Live Logs | Included |
-| Credit plans and manual UPI review | Included |
-| Supabase Storage persistence | Optional configuration |
-| Scoped API tokens | Included |
-\n| GitHub OAuth repository import | Requires OAuth App configuration |
-| Guaranteed 24/7 free runtime | Not guaranteed |
-| Secure isolation for untrusted public code | Requires additional infrastructure |
+- Available runtime resources depend on the hosting provider and its plan.
+- Free hosting services may sleep, restart or stop applications. CYBER HOST cannot guarantee uninterrupted 24/7 bot uptime.
+- Automatic backups depend on a working private Supabase Storage configuration.
+- Backups are periodic, so keep independent copies of important bot data.
+- A bot must save its own session or application data to disk or an external database for that information to persist.
+- Dependency installation may fail if a package is unavailable, incompatible or exceeds host resource limits.
+- Uploaded bot code executes on the hosting server. Only deploy code you trust.
+- Per-bot folders organize data but do not provide hardened operating-system isolation between untrusted programs.
+- Never share administrator credentials, API tokens, bot tokens or Supabase service credentials.
 
 ---
 
 <div align="center">
 
-### `[ END OF TRANSMISSION ]`
+## CYBER HOST
 
-**CYBER HOST // BUILD • DEPLOY • MONITOR**
+**A single dashboard to deploy, manage and monitor your Telegram bots.**
 
-`FREE PANEL CODE` · `PYTHON` · `JAVASCRIPT` · `ZIP` · `ANDROID READY`
+Built for a smooth mobile experience.
+
+### Owner — Anand Singh
 
 </div>
