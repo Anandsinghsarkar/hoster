@@ -739,12 +739,10 @@ def _admin_page_data():
 @app.get("/admin/storage")
 @admin_required
 def admin_storage_page():
-    try:
-        disk = shutil.disk_usage(DATA)
-        disk_total, disk_used, disk_free = disk.total, disk.used, disk.free
-    except OSError:
-        disk_total = disk_used = disk_free = 0
+    # DATA_DIR size is the app-owned data footprint. disk_usage(DATA) reports
+    # the underlying shared/container filesystem, not this Render service's quota.
     local_used = _directory_size(DATA)
+    disk_total = disk_used = disk_free = 0
     orphan_cleanup = _prune_orphaned_bot_storage()
     remote = _supabase_bucket_usage()
     quota_gb = os.getenv("SUPABASE_STORAGE_QUOTA_GB", "").strip()
