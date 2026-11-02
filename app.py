@@ -657,11 +657,17 @@ def admin_storage_page():
     return render_template("workspace.html", page="admin_storage", user=get_user(),
         storage_stats={"local_used":_format_bytes(local_used),
           "disk_total":_format_bytes(disk_total),"disk_used":_format_bytes(disk_used),
-          "disk_free":_format_bytes(disk_free),"remote_used":_format_bytes(remote["used"]),
+          "disk_free":_format_bytes(disk_free),
+          "disk_percent":round(disk_used*100/disk_total,1) if disk_total else 0,
+          "disk_used_bytes":disk_used,"disk_total_bytes":disk_total,"disk_free_bytes":disk_free,
+          "local_used_bytes":local_used,
+          "remote_used":_format_bytes(remote["used"]),"remote_used_bytes":remote["used"],
           "remote_objects":remote["objects"],"remote_enabled":remote["enabled"],
-          "remote_error":remote["error"],"quota":_format_bytes(quota_bytes) if quota_bytes else "Not configured",
+          "remote_error":remote["error"],"quota":_format_bytes(quota_bytes) if quota_bytes else "Not exposed by Storage API",
+          "remote_total":_format_bytes(quota_bytes) if quota_bytes else "Unknown",
           "remote_free":_format_bytes(remote_free) if remote_free is not None else "Unknown",
-          "remote_percent":round(remote["used"]*100/quota_bytes,1) if quota_bytes else None})
+          "remote_percent":round(remote["used"]*100/quota_bytes,1) if quota_bytes else None,
+          "remote_free_percent":round(remote_free*100/quota_bytes,1) if quota_bytes else None})
 
 @app.get("/admin/bots")
 @admin_required
