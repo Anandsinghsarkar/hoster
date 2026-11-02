@@ -146,6 +146,69 @@ def _storage_delete(object_path):
     # (including b"") means the HTTP request succeeded.
     return _storage_request("DELETE", object_path) is not None
 
+def _directory_size(path):
+    total = 0
+    try:
+        for root, dirs, files in os.walk(path, followlinks=False):
+            dirs[:] = [d for d in dirs if not (Path(root) / d).is_symlink()]
+            for name in files:
+                item = Path(root) / name
+                try:
+                    if not item.is_symlink(): total += item.stat().st_size
+                except OSError: pass
+    except OSError: pass
+    return total
+
+def _format_bytes(value):
+    value = float(max(0, value))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB": return f"{value:.2f} {unit}"
+        value /= 1024
+
+def _supabase_bucket_usage():
+    """Sum object metadata in the configured bucket; this is not the account quota."""
+    if not _storage_enabled():
+        return {"enabled": False, "used": 0, "objects": 0, "error": "Supabase Storage is not configured."}
+    total = count = 0
+    pending = [""]
+    visited = set()
+    try:
+        while pending and count < 10000:
+            prefix = pending.pop()
+            if prefix in visited: continue
+            visited.add(prefix)
+            offset = 0
+            while count < 10000:
+                payload = json.dumps({"prefix": prefix, "limit": 100, "offset": offset,
+                                      "sortBy": {"column": "name", "order": "asc"}}).encode()
+                headers = {"apikey": SUPABASE_SERVICE_KEY,
+                           "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
+                           "Content-Type": "application/json"}
+                req = urllib.request.Request(
+                    f"{SUPABASE_URL}/storage/v1/object/list/{quote(SUPABASE_STORAGE_BUCKET, safe='')}",
+                    data=payload, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=25) as response:
+                    items = json.loads(response.read().decode("utf-8"))
+                if not isinstance(items, list): raise ValueError("Unexpected Supabase list response")
+                for item in items:
+                    name = str(item.get("name", ""))
+                    if not name: continue
+                    metadata = item.get("metadata") or {}
+                    size = metadata.get("size")
+                    if size is not None:
+                        try: total += int(size); count += 1
+                        except (TypeError, ValueError): pass
+                    elif not item.get("id"):
+                        child = prefix + name.strip("/") + "/"
+                        if child != prefix: pending.append(child)
+                if len(items) < 100: break
+                offset += len(items)
+        return {"enabled": True, "used": total, "objects": count,
+                "error": "Object scan reached the 10,000-object safety limit." if pending or count >= 10000 else ""}
+    except Exception as exc:
+        return {"enabled": True, "used": total, "objects": count,
+                "error": f"{type(exc).__name__}: {exc}"}
+
 def _restore_database_snapshot():
     if _storage_enabled() and not DB.exists():
         _storage_download_file("_system/hosting.db", DB)
@@ -576,6 +639,29 @@ def _admin_page_data():
         settings={r["key"]:r["value"] for r in c.execute("SELECT * FROM settings").fetchall()}
         api_tokens=c.execute("SELECT id,name,token_prefix,scopes,created_at,expires_at,last_used_at,revoked_at FROM api_tokens ORDER BY id DESC").fetchall()
     return users,bots,payments,plans,settings,api_tokens
+
+@app.get("/admin/storage")
+@admin_required
+def admin_storage_page():
+    try:
+        disk = shutil.disk_usage(DATA)
+        disk_total, disk_used, disk_free = disk.total, disk.used, disk.free
+    except OSError:
+        disk_total = disk_used = disk_free = 0
+    local_used = _directory_size(DATA)
+    remote = _supabase_bucket_usage()
+    quota_gb = os.getenv("SUPABASE_STORAGE_QUOTA_GB", "").strip()
+    try: quota_bytes = int(float(quota_gb) * 1024**3) if quota_gb else 0
+    except ValueError: quota_bytes = 0
+    remote_free = max(0, quota_bytes - remote["used"]) if quota_bytes else None
+    return render_template("workspace.html", page="admin_storage", user=get_user(),
+        storage_stats={"local_used":_format_bytes(local_used),
+          "disk_total":_format_bytes(disk_total),"disk_used":_format_bytes(disk_used),
+          "disk_free":_format_bytes(disk_free),"remote_used":_format_bytes(remote["used"]),
+          "remote_objects":remote["objects"],"remote_enabled":remote["enabled"],
+          "remote_error":remote["error"],"quota":_format_bytes(quota_bytes) if quota_bytes else "Not configured",
+          "remote_free":_format_bytes(remote_free) if remote_free is not None else "Unknown",
+          "remote_percent":round(remote["used"]*100/quota_bytes,1) if quota_bytes else None})
 
 @app.get("/admin/bots")
 @admin_required
