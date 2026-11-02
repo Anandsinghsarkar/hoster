@@ -202,6 +202,42 @@ def _delete_bot_storage(bot_id, filename=""):
         except Exception: ok = False
     return ok, removed
 
+def _prune_orphaned_bot_storage():
+    """Remove remote bot files whose bot records were deleted in older versions."""
+    if not _storage_enabled(): return {"ok": False, "removed": 0}
+    try:
+        with db() as conn:
+            rows = conn.execute("SELECT id,filename FROM bots WHERE status!='deleted'").fetchall()
+        active_ids = {str(row["id"]) for row in rows}
+        active_uploads = {str(row["filename"]) for row in rows}
+        removed = 0
+        for path in (_storage_list_prefix("bot-data") or []):
+            parts = path.split("/")
+            if len(parts) >= 3 and parts[1] not in active_ids:
+                ok, count = _storage_delete_prefix("bot-data/" + parts[1])
+                if not ok: return {"ok": False, "removed": removed}
+                removed += count
+        for path in (_storage_list_prefix("uploads") or []):
+            if path.split("/", 1)[-1] not in active_uploads:
+                if not _storage_delete(path): return {"ok": False, "removed": removed}
+                removed += 1
+        # Clean stale local folders too, but never touch a currently running process.
+        for root in (RUNTIMES, BOT_DATA):
+            if root.exists():
+                for child in root.iterdir():
+                    if child.name not in active_ids:
+                        try:
+                            bot_num = int(child.name)
+                            with process_lock:
+                                proc = processes.get(bot_num)
+                                alive = bool(proc and proc.poll() is None)
+                            if not alive: shutil.rmtree(child, ignore_errors=True)
+                        except (ValueError, OSError): pass
+        return {"ok": True, "removed": removed}
+    except Exception as exc:
+        sys.stderr.write(f"[storage] orphan cleanup failed: {type(exc).__name__}: {exc}\\n")
+        return {"ok": False, "removed": 0}
+
 def _directory_size(path):
     total = 0
     try:
@@ -709,6 +745,7 @@ def admin_storage_page():
     except OSError:
         disk_total = disk_used = disk_free = 0
     local_used = _directory_size(DATA)
+    orphan_cleanup = _prune_orphaned_bot_storage()
     remote = _supabase_bucket_usage()
     quota_gb = os.getenv("SUPABASE_STORAGE_QUOTA_GB", "").strip()
     try: quota_bytes = int(float(quota_gb) * 1024**3) if quota_gb else 0
@@ -723,7 +760,9 @@ def admin_storage_page():
           "local_used_bytes":local_used,
           "remote_used":_format_bytes(remote["used"]),"remote_used_bytes":remote["used"],
           "remote_objects":remote["objects"],"remote_enabled":remote["enabled"],
-          "remote_error":remote["error"],"bot_remote_used":_format_bytes(remote.get("bot_used",0)),
+          "remote_error":remote["error"],"orphan_cleanup_ok":orphan_cleanup["ok"],
+          "orphan_objects_removed":orphan_cleanup["removed"],
+          "bot_remote_used":_format_bytes(remote.get("bot_used",0)),
           "bot_remote_objects":remote.get("bot_objects",0),
           "quota":_format_bytes(quota_bytes) if quota_bytes else "Not exposed by Storage API",
           "remote_total":_format_bytes(quota_bytes) if quota_bytes else "Unknown",
