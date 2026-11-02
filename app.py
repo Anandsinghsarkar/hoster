@@ -808,7 +808,8 @@ def stop_process(bot_id):
             proc.kill()
             proc.wait(timeout=3)
         _write_log(bot_id, f"[control] Process stopped (exit code {proc.returncode}).")
-        _snapshot_bot_runtime(bot_id)
+        saved = _snapshot_bot_runtime(bot_id)
+        _cleanup_bot_local_files(bot_id, saved)
 
 def _detect_python_packages(entry):
     """Infer a conservative set of common third-party packages for single-file uploads."""
@@ -978,9 +979,41 @@ def _restore_bot_runtime(bot_id, runtime):
         _write_log(bot_id, "[storage] Previous bot project and session data restored from automatic backup."); return True
     except Exception as exc:
         _write_log(bot_id, f"[storage] Backup restore failed: {type(exc).__name__}: {exc}"); return False
+def _cleanup_bot_local_files(bot_id, snapshot_ok=False):
+    """Free Render's ephemeral disk only after a durable Supabase snapshot exists."""
+    if not (_storage_enabled() and snapshot_ok):
+        return False
+    # A running process must never have its files removed.
+    with process_lock:
+        active = processes.get(int(bot_id))
+        if active and active.poll() is None:
+            return False
+    try:
+        shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
+        shutil.rmtree(BOT_DATA / str(bot_id), ignore_errors=True)
+        # Original uploads remain safely stored in Supabase and are downloaded
+        # again only when needed (start/edit/admin file view).
+        with db() as c:
+            row = c.execute("SELECT filename FROM bots WHERE id=? AND status!='deleted'", (bot_id,)).fetchone()
+        if row:
+            (UPLOADS / row["filename"]).unlink(missing_ok=True)
+        # Keep only the newest 256 KB of each bot log.
+        log_path = LOGS / f"{bot_id}.log"
+        if log_path.is_file() and log_path.stat().st_size > 256 * 1024:
+            with log_path.open("rb") as handle:
+                handle.seek(-256 * 1024, os.SEEK_END)
+                recent = handle.read()
+            log_path.write_bytes(b"[system] Older log output trimmed to save Render disk.\\n" + recent)
+        return True
+    except Exception as exc:
+        _write_log(bot_id, f"[cleanup] Local cleanup failed: {type(exc).__name__}: {exc}")
+        return False
+
 def _bot_backup_loop(bot_id, runtime, proc):
+    # Backups every 3 minutes reduce repeated ZIP/CPU work while limiting the
+    # amount of bot data that could be lost if the instance crashes suddenly.
     while proc.poll() is None:
-        time.sleep(60)
+        time.sleep(180)
         if proc.poll() is None: _snapshot_bot_runtime(bot_id, runtime)
 
 def run_bot(bot):
@@ -1140,7 +1173,7 @@ def run_bot(bot):
 
         def monitor():
             exit_code = proc.wait()
-            _snapshot_bot_runtime(bot_id, runtime)
+            saved = _snapshot_bot_runtime(bot_id, runtime)
             with process_lock:
                 if processes.get(bot_id) is proc:
                     processes.pop(bot_id, None)
@@ -1155,6 +1188,7 @@ def run_bot(bot):
                     c.execute("UPDATE bots SET status=?,last_error=? WHERE id=?",
                               ("stopped" if exit_code == 0 else "error", error[:500], bot_id))
             _write_log(bot_id, f"[system] Process exited with code {exit_code}.")
+            _cleanup_bot_local_files(bot_id, saved)
             if exit_code != 0:
                 _write_log(bot_id, "[diagnostic] Last bot output: " + (_recent_log_excerpt(bot_id) or "No output captured."))
         threading.Thread(target=monitor, daemon=True).start()
