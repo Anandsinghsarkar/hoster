@@ -159,6 +159,8 @@ Open **Admin Panel → Storage** to scan the local Render data directory and the
 - **Render filesystem total/used/free** comes from the filesystem containing that data directory.
 - **Supabase used space** is estimated by summing object-size metadata returned by the Storage API (up to 10,000 objects per scan).
 - Supabase's Storage API does not expose your subscription quota or billing allowance. Set `SUPABASE_STORAGE_QUOTA_GB` to the actual quota for your project to display estimated remaining space and percentage. Leave it unset if you do not know the quota.
+- Bot storage is counted separately from website/system objects: it includes only `bot-data/` runtime backups and `uploads/` source files. Deleting a bot removes its nested backup folder and source upload. Opening Admin → Storage also prunes orphaned bot folders and uploads left by older versions when no non-deleted bot record owns them.
+- The full bucket total can remain non-zero after every bot is deleted because the website database snapshot and other system objects share the same bucket. This is website storage, not leftover bot storage.
 
 Optional Render environment variable:
 
