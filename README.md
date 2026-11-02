@@ -151,6 +151,27 @@ This can preserve supported files written to disk by the bot or its libraries. D
 > - Keep independent copies of important data and test restore behavior.
 > - A bot must write its session or application data to disk (or an external database) for that data to persist.
 
+### 📊 Storage Monitor (Admin)
+
+Open **Admin Panel → Storage** to scan the local Render data directory and the configured Supabase bucket.
+
+- **Render application data** is measured by walking the configured `DATA_DIR`.
+- **Render filesystem total/used/free** comes from the filesystem containing that data directory.
+- **Supabase used space** is estimated by summing object-size metadata returned by the Storage API (up to 10,000 objects per scan).
+- Supabase's Storage API does not expose your subscription quota or billing allowance. Set `SUPABASE_STORAGE_QUOTA_GB` to the actual quota for your project to display estimated remaining space and percentage. Leave it unset if you do not know the quota.
+
+Optional Render environment variable:
+
+```env
+SUPABASE_STORAGE_QUOTA_GB=1
+```
+
+Use the quota value from your own Supabase plan/dashboard; do not assume the example value is your allowance. Storage scans make API requests and may take time for buckets containing many objects.
+
+**Important:** Supabase Storage is object storage, not a POSIX disk mounted into Render. A running arbitrary Python/Node.js bot still needs its code, dependencies and active working files on the host. This project backs up supported bot files to Supabase and cleans eligible local copies after a successful backup/stop; it cannot redirect every arbitrary file write to Supabase in real time. For large databases or frequent writes, use a database service or adapt the bot to store its data remotely.
+
+---
+ 
 ## 💳 Credit Store & Payments
 
 The Credit Store displays the plans enabled by the administrator.
