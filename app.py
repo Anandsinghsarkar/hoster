@@ -146,6 +146,62 @@ def _storage_delete(object_path):
     # (including b"") means the HTTP request succeeded.
     return _storage_request("DELETE", object_path) is not None
 
+def _storage_list_prefix(prefix):
+    """List all files below a folder, including nested folders."""
+    if not _storage_enabled(): return None
+    objects, pending, visited = [], [prefix.strip("/") + "/"], set()
+    headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
+               "Content-Type": "application/json"}
+    endpoint = f"{SUPABASE_URL}/storage/v1/object/list/{quote(SUPABASE_STORAGE_BUCKET, safe='')}"
+    while pending:
+        folder = pending.pop()
+        if folder in visited: continue
+        visited.add(folder); offset = 0
+        while True:
+            body = json.dumps({"prefix": folder, "limit": 100, "offset": offset,
+                               "sortBy": {"column": "name", "order": "asc"}}).encode()
+            req = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as response:
+                items = json.loads(response.read().decode("utf-8"))
+            if not isinstance(items, list): raise ValueError("Unexpected Supabase list response")
+            for item in items:
+                name = str(item.get("name", ""))
+                if not name: continue
+                if item.get("id") or (item.get("metadata") or {}).get("size") is not None:
+                    objects.append(folder + name)
+                else:
+                    pending.append(folder + name.strip("/") + "/")
+                if len(objects) > 50000: raise RuntimeError("Cleanup safety limit exceeded (50,000 files).")
+            if len(items) < 100: break
+            offset += len(items)
+    return objects
+
+def _storage_delete_prefix(prefix):
+    """Delete all objects under one bot folder; do not proceed if listing fails."""
+    if not _storage_enabled(): return False, 0
+    try:
+        objects = _storage_list_prefix(prefix)
+        endpoint = f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_STORAGE_BUCKET, safe='')}"
+        headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
+                   "Content-Type": "application/json"}
+        for start in range(0, len(objects), 100):
+            req = urllib.request.Request(endpoint, data=json.dumps({"prefixes": objects[start:start+100]}).encode(),
+                                         headers=headers, method="DELETE")
+            with urllib.request.urlopen(req, timeout=45) as response: response.read()
+        return True, len(objects)
+    except Exception as exc:
+        sys.stderr.write(f"[supabase-storage] prefix cleanup {prefix!r} failed: {type(exc).__name__}: {exc}\\n")
+        return False, 0
+
+def _delete_bot_storage(bot_id, filename=""):
+    ok, removed = _storage_delete_prefix(f"bot-data/{int(bot_id)}")
+    if filename:
+        try:
+            if _storage_delete("uploads/" + filename): removed += 1
+            else: ok = False
+        except Exception: ok = False
+    return ok, removed
+
 def _directory_size(path):
     total = 0
     try:
@@ -169,16 +225,16 @@ def _supabase_bucket_usage():
     """Sum object metadata in the configured bucket; this is not the account quota."""
     if not _storage_enabled():
         return {"enabled": False, "used": 0, "objects": 0, "error": "Supabase Storage is not configured."}
-    total = count = 0
+    total = count = bot_total = bot_count = 0
     pending = [""]
     visited = set()
     try:
-        while pending and count < 10000:
+        while pending and count < 50000:
             prefix = pending.pop()
             if prefix in visited: continue
             visited.add(prefix)
             offset = 0
-            while count < 10000:
+            while count < 50000:
                 payload = json.dumps({"prefix": prefix, "limit": 100, "offset": offset,
                                       "sortBy": {"column": "name", "order": "asc"}}).encode()
                 headers = {"apikey": SUPABASE_SERVICE_KEY,
@@ -193,21 +249,26 @@ def _supabase_bucket_usage():
                 for item in items:
                     name = str(item.get("name", ""))
                     if not name: continue
+                    object_path = prefix + name
                     metadata = item.get("metadata") or {}
                     size = metadata.get("size")
                     if size is not None:
-                        try: total += int(size); count += 1
+                        try:
+                            amount = int(size); total += amount; count += 1
+                            if object_path.startswith(("bot-data/", "uploads/")):
+                                bot_total += amount; bot_count += 1
                         except (TypeError, ValueError): pass
                     elif not item.get("id"):
                         child = prefix + name.strip("/") + "/"
                         if child != prefix: pending.append(child)
                 if len(items) < 100: break
                 offset += len(items)
-        return {"enabled": True, "used": total, "objects": count,
-                "error": "Object scan reached the 10,000-object safety limit." if pending or count >= 10000 else ""}
+        error = "Object scan reached the 50,000-object safety limit." if pending or count >= 50000 else ""
+        return {"enabled": True, "used": total, "objects": count, "bot_used": bot_total,
+                "bot_objects": bot_count, "error": error}
     except Exception as exc:
-        return {"enabled": True, "used": total, "objects": count,
-                "error": f"{type(exc).__name__}: {exc}"}
+        return {"enabled": True, "used": total, "objects": count, "bot_used": bot_total,
+                "bot_objects": bot_count, "error": f"{type(exc).__name__}: {exc}"}
 
 def _restore_database_snapshot():
     if _storage_enabled() and not DB.exists():
@@ -493,11 +554,10 @@ def api_bot_delete(bot_id):
     with db() as c: c.execute("UPDATE bots SET status='deleted' WHERE id=?", (bot_id,))
     shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
     shutil.rmtree(BOT_DATA / str(bot_id), ignore_errors=True)
-    if _storage_enabled(): _storage_delete(_bot_snapshot_object(bot_id))
     try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
     except OSError: pass
-    if _storage_enabled():
-        _storage_delete("uploads/" + bot["filename"])
+    storage_ok, removed_objects = _delete_bot_storage(bot_id, bot["filename"])
+    if not storage_ok: sys.stderr.write(f"[storage] Bot {bot_id} remote cleanup failed; check Supabase logs.\\n")
     return Response(json.dumps({"ok": True, "deleted_bot_id": bot_id}), mimetype="application/json")
 
 @app.get("/api/v1/payments")
@@ -663,7 +723,9 @@ def admin_storage_page():
           "local_used_bytes":local_used,
           "remote_used":_format_bytes(remote["used"]),"remote_used_bytes":remote["used"],
           "remote_objects":remote["objects"],"remote_enabled":remote["enabled"],
-          "remote_error":remote["error"],"quota":_format_bytes(quota_bytes) if quota_bytes else "Not exposed by Storage API",
+          "remote_error":remote["error"],"bot_remote_used":_format_bytes(remote.get("bot_used",0)),
+          "bot_remote_objects":remote.get("bot_objects",0),
+          "quota":_format_bytes(quota_bytes) if quota_bytes else "Not exposed by Storage API",
           "remote_total":_format_bytes(quota_bytes) if quota_bytes else "Unknown",
           "remote_free":_format_bytes(remote_free) if remote_free is not None else "Unknown",
           "remote_percent":round(remote["used"]*100/quota_bytes,1) if quota_bytes else None,
@@ -1598,12 +1660,13 @@ def bot_action(bot_id, action):
         with db() as c: c.execute("UPDATE bots SET status='deleted' WHERE id=?", (bot_id,))
         shutil.rmtree(RUNTIMES / str(bot_id), ignore_errors=True)
         shutil.rmtree(BOT_DATA / str(bot_id), ignore_errors=True)
-        if _storage_enabled(): _storage_delete(_bot_snapshot_object(bot_id))
         try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
         except Exception: pass
-        if _storage_enabled():
-            _storage_delete("uploads/" + bot["filename"])
-        flash("Bot and its stored files were deleted.", "success")
+        storage_ok, removed_objects = _delete_bot_storage(bot_id, bot["filename"])
+        if storage_ok:
+            flash(f"Bot deleted. Removed {removed_objects} remote storage object(s).", "success")
+        else:
+            flash("Bot deleted locally, but Supabase cleanup failed. Check credentials/logs and retry.", "warning")
     elif action == "stop":
         stop_process(bot_id)
         with db() as c: c.execute("UPDATE bots SET status='stopped' WHERE id=?", (bot_id,))
