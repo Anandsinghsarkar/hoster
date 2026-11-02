@@ -979,6 +979,17 @@ def _restore_bot_runtime(bot_id, runtime):
         _write_log(bot_id, "[storage] Previous bot project and session data restored from automatic backup."); return True
     except Exception as exc:
         _write_log(bot_id, f"[storage] Backup restore failed: {type(exc).__name__}: {exc}"); return False
+def _trim_bot_log(bot_id, max_bytes=256 * 1024):
+    try:
+        path = LOGS / f"{bot_id}.log"
+        if path.is_file() and path.stat().st_size > max_bytes:
+            with path.open("rb") as handle:
+                handle.seek(-max_bytes, os.SEEK_END)
+                recent = handle.read()
+            path.write_bytes(b"[system] Older log output trimmed to save Render disk.\\n" + recent)
+    except OSError:
+        pass
+
 def _cleanup_bot_local_files(bot_id, snapshot_ok=False):
     """Free Render's ephemeral disk only after a durable Supabase snapshot exists."""
     if not (_storage_enabled() and snapshot_ok):
@@ -1014,7 +1025,9 @@ def _bot_backup_loop(bot_id, runtime, proc):
     # amount of bot data that could be lost if the instance crashes suddenly.
     while proc.poll() is None:
         time.sleep(180)
-        if proc.poll() is None: _snapshot_bot_runtime(bot_id, runtime)
+        if proc.poll() is None:
+            _snapshot_bot_runtime(bot_id, runtime)
+            _trim_bot_log(bot_id)
 
 def run_bot(bot):
     bot_id = bot["id"]
