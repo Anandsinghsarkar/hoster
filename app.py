@@ -746,6 +746,13 @@ def edit_bot_code(bot_id):
             return redirect(url_for("edit_bot_code", bot_id=bot_id))
         can_run = bot["status"] in ("approved", "running", "stopped", "error") or bool(u["is_admin"])
         stop_process(bot_id)
+        # stop_process may have cleared the local cache after a successful
+        # Supabase backup; fetch the durable original again before editing.
+        if not source.is_file() and _storage_enabled():
+            _storage_download_file("uploads/" + bot["filename"], source)
+        if not source.is_file():
+            flash("Source file could not be restored from Supabase; old code was kept.", "danger")
+            return redirect(url_for("my_bots"))
         try:
             temporary = source.with_name(source.name + ".new")
             temporary.write_text(code, encoding="utf-8")
