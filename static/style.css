@@ -303,3 +303,17 @@ footer{display:flex;justify-content:space-between;padding:24px 0 30px;border-top
   .table-panel{padding:17px 12px 5px}
   .section-head h2{font-size:28px}
 }
+
+
+/* CYBER HOST refresh — refined workspace surfaces and upload workflow */
+:root{--bg:#080b13;--panel:#101726;--panel2:#152137;--surface:#0c1320;--line:rgba(151,174,220,.14);--line2:rgba(151,174,220,.25);--accent:#7c9cff;--accent2:#536ff0;--accent-soft:rgba(124,156,255,.14);--shadow:0 18px 48px -24px rgba(0,0,0,.78),inset 0 1px rgba(255,255,255,.035)}
+.ambient-a{background:#345dff;opacity:.13}.nav{background:rgba(8,11,19,.86);border-bottom-color:rgba(151,174,220,.16)}
+.panel,.stat-card,.price-card{background:linear-gradient(145deg,rgba(19,29,47,.97),rgba(12,18,30,.98));border-color:rgba(151,174,220,.16);box-shadow:var(--shadow)}
+.panel{padding:clamp(18px,3vw,26px);border-radius:20px}.page-heading{padding:30px 0 22px}.page-heading h1{letter-spacing:-.045em}.page-heading p{color:#a4b1ca}
+.btn-primary{background:linear-gradient(135deg,#7899ff,#536ff0);box-shadow:0 9px 24px -12px rgba(83,111,240,.95)}.btn-outline,.tiny-btn{background:rgba(255,255,255,.025);border-color:rgba(151,174,220,.2)}.tiny-btn{border-radius:9px}
+.workspace-row{padding:18px 0}.workspace-row:hover .workspace-main b{color:#b9cbff}.status-badge{border-radius:30px;padding:5px 10px;letter-spacing:.04em;font-size:10px}
+.form-grid input:not([type=checkbox]),.form-grid select,.form-grid textarea{border:1px solid rgba(151,174,220,.2);border-radius:12px;background:#0b1220;color:var(--text);padding:12px 14px}
+.form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus{outline:none;border-color:#7899ff;box-shadow:0 0 0 3px rgba(120,153,255,.13)}
+.env-editor{border-color:rgba(151,174,220,.18);border-radius:15px;background:rgba(5,10,20,.35)}.upload-env-row input{background:#0b1220}
+.empty-state{border:1px dashed rgba(151,174,220,.25);border-radius:16px;padding:30px 18px}
+@media(max-width:760px){.page-heading{padding-top:22px}.panel{padding:17px}.workspace-row{gap:12px}.workspace-actions{gap:8px}}
