@@ -1030,6 +1030,7 @@ def _detect_python_packages(project_root):
     local_modules.update(p.name for p in root.iterdir() if p.is_dir())
     stdlib=getattr(sys,"stdlib_module_names",set())
     scanned=0
+    legacy_telegram_api=False
     for source in root.rglob("*.py"):
         if any(part in {"vendor","venv",".venv","node_modules",".git","__pycache__"} for part in source.parts):
             continue
@@ -1042,8 +1043,15 @@ def _detect_python_packages(project_root):
                 modules.update(alias.name.split(".",1)[0] for alias in node.names)
             elif isinstance(node,ast.ImportFrom) and node.module:
                 modules.add(node.module.split(".",1)[0])
+                # python-telegram-bot v20+ removed the legacy Filters API.
+                if node.module == "telegram.ext" and any(alias.name == "Filters" for alias in node.names):
+                    legacy_telegram_api=True
     third_party={m for m in modules if m not in stdlib and m not in local_modules and m!="__future__"}
     packages=sorted({module_to_package[m] for m in third_party if m in module_to_package})
+    if legacy_telegram_api:
+        packages=[p for p in packages if not p.lower().startswith("python-telegram-bot")]
+        packages.append("python-telegram-bot==13.15")
+        packages.sort()
     unknown=sorted(m for m in third_party if m not in module_to_package)
     return packages,unknown,scanned
 
@@ -1318,6 +1326,8 @@ def run_bot(bot):
                 inferred, unknown_imports, scanned_count = _detect_python_packages(project_root)
                 log.write(f"[detect] Scanned {scanned_count} Python source file(s).\n")
                 log.write("[detect] Known dependencies: " + (", ".join(inferred) if inferred else "none") + "\n")
+                if "python-telegram-bot==13.15" in inferred:
+                    log.write("[detect] Legacy Telegram Filters API found; pinning python-telegram-bot 13.15 for compatibility.\n")
                 if unknown_imports:
                     log.write("[detect] Unmapped imports (add their package names to requirements.txt if needed): " +
                               ", ".join(unknown_imports[:60]) + "\n")
