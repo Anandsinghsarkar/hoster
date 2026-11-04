@@ -1009,34 +1009,42 @@ def stop_process(bot_id):
         saved = _snapshot_bot_runtime(bot_id)
         _cleanup_bot_local_files(bot_id, saved)
 
-def _detect_python_packages(entry):
-    """Infer a conservative set of common third-party packages for single-file uploads."""
+def _detect_python_packages(project_root):
+    """Scan every Python source and infer only known third-party package mappings."""
     module_to_package = {
-        "requests": "requests", "telegram": "python-telegram-bot",
-        "telebot": "pyTelegramBotAPI", "aiogram": "aiogram",
-        "discord": "discord.py", "aiohttp": "aiohttp",
-        "bs4": "beautifulsoup4", "PIL": "Pillow",
-        "dotenv": "python-dotenv", "pymongo": "pymongo",
-        "motor": "motor", "yt_dlp": "yt-dlp",
-        "cv2": "opencv-python-headless", "numpy": "numpy",
-        "pandas": "pandas", "flask": "Flask",
-        "httpx": "httpx", "openai": "openai",
-        "google": "google-api-python-client", "yaml": "PyYAML",
-        "schedule": "schedule", "apscheduler": "APScheduler",
-        "bs4": "beautifulsoup4", "cryptography": "cryptography",
+        "requests":"requests","telegram":"python-telegram-bot","telebot":"pyTelegramBotAPI",
+        "aiogram":"aiogram","discord":"discord.py","aiohttp":"aiohttp","bs4":"beautifulsoup4",
+        "PIL":"Pillow","dotenv":"python-dotenv","pymongo":"pymongo","motor":"motor",
+        "yt_dlp":"yt-dlp","cv2":"opencv-python-headless","numpy":"numpy","pandas":"pandas",
+        "flask":"Flask","httpx":"httpx","openai":"openai","google":"google-api-python-client",
+        "yaml":"PyYAML","schedule":"schedule","apscheduler":"APScheduler","cryptography":"cryptography",
+        "pytz":"pytz","dateutil":"python-dateutil","qrcode":"qrcode","redis":"redis",
+        "sqlalchemy":"SQLAlchemy","websockets":"websockets","websocket":"websocket-client",
+        "paramiko":"paramiko","lxml":"lxml","jose":"python-jose","jwt":"PyJWT","stripe":"stripe",
+        "fastapi":"fastapi","uvicorn":"uvicorn","rich":"rich","colorama":"colorama","loguru":"loguru"
     }
-    try:
-        tree = ast.parse(entry.read_text(encoding="utf-8", errors="replace"))
-    except (SyntaxError, OSError, UnicodeError):
-        return []
-    modules = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name.split(".", 1)[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module.split(".", 1)[0])
-    stdlib = getattr(sys, "stdlib_module_names", set())
-    return sorted({module_to_package[m] for m in modules if m in module_to_package and m not in stdlib})
+    root=Path(project_root)
+    modules=set()
+    local_modules={p.stem for p in root.rglob("*.py")}
+    local_modules.update(p.name for p in root.iterdir() if p.is_dir())
+    stdlib=getattr(sys,"stdlib_module_names",set())
+    scanned=0
+    for source in root.rglob("*.py"):
+        if any(part in {"vendor","venv",".venv","node_modules",".git","__pycache__"} for part in source.parts):
+            continue
+        scanned+=1
+        if scanned>500: break
+        try: tree=ast.parse(source.read_text(encoding="utf-8",errors="replace"))
+        except (SyntaxError,OSError,UnicodeError): continue
+        for node in ast.walk(tree):
+            if isinstance(node,ast.Import):
+                modules.update(alias.name.split(".",1)[0] for alias in node.names)
+            elif isinstance(node,ast.ImportFrom) and node.module:
+                modules.add(node.module.split(".",1)[0])
+    third_party={m for m in modules if m not in stdlib and m not in local_modules and m!="__future__"}
+    packages=sorted({module_to_package[m] for m in third_party if m in module_to_package})
+    unknown=sorted(m for m in third_party if m not in module_to_package)
+    return packages,unknown,scanned
 
 def _run_setup_command(command, cwd, env, log, label, timeout=360):
     """Run dependency setup with explicit diagnostics and one conservative pip retry."""
@@ -1301,31 +1309,34 @@ def run_bot(bot):
                 "npm_config_fund": "false",
             })
 
-            # Python: install requirements.txt automatically. For a lone .py file,
-            # infer a small allowlist of common packages; custom packages should be
-            # declared in requirements.txt inside a ZIP project.
+            # Scan all Python sources, including ZIP projects without a manifest.
             if entry.suffix.lower() == ".py":
                 vendor = runtime / "vendor"
                 vendor.mkdir(parents=True, exist_ok=True)
                 req_files = sorted(project_root.rglob("requirements.txt"))
+                inferred, unknown_imports, scanned_count = _detect_python_packages(project_root)
+                log.write(f"[detect] Scanned {scanned_count} Python source file(s).\\n")
+                log.write("[detect] Known dependencies: " + (", ".join(inferred) if inferred else "none") + "\\n")
+                if unknown_imports:
+                    log.write("[detect] Unmapped imports (add their package names to requirements.txt if needed): " +
+                              ", ".join(unknown_imports[:60]) + "\\n")
                 if req_files:
-                    req = req_files[0]
+                    for index, req in enumerate(req_files):
+                        command = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                                   "--no-warn-script-location", "--target", str(vendor), "-r", str(req)]
+                        if index == 0 and inferred:
+                            command.extend(inferred)
+                        _run_setup_command(command, req.parent, env, log,
+                                           f"Install requirements ({req.relative_to(project_root)})")
+                    log.write(f"[setup] Processed {len(req_files)} requirements.txt file(s).\\n")
+                elif inferred:
                     _run_setup_command(
                         [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-                         "--no-warn-script-location", "--target", str(vendor), "-r", str(req)],
-                        project_root, env, log, f"Install Python requirements ({req.relative_to(project_root)})"
+                         "--no-warn-script-location", "--target", str(vendor), *inferred],
+                        project_root, env, log, "Install dependencies detected from Python imports"
                     )
                 else:
-                    inferred = _detect_python_packages(entry)
-                    if inferred:
-                        log.write("[setup] Detected common imports: " + ", ".join(inferred) + "\n")
-                        _run_setup_command(
-                            [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-                             "--no-warn-script-location", "--target", str(vendor), *inferred],
-                            project_root, env, log, "Install detected Python packages"
-                        )
-                    else:
-                        log.write("[setup] No known third-party imports detected; skipping pip install.\n")
+                    log.write("[setup] No mapped third-party imports found; pip install skipped.\\n")
                 cmd = [sys.executable, "-u", str(entry)]
 
             # JavaScript: install package.json dependencies when present. The Docker
