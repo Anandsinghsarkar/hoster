@@ -1051,6 +1051,11 @@ def _detect_python_packages(project_root):
     if legacy_telegram_api:
         packages=[p for p in packages if not p.lower().startswith("python-telegram-bot")]
         packages.append("python-telegram-bot==13.15")
+        # PTB 13.15 falls back to the external urllib3 package on newer
+        # Python environments. urllib3 2.x removed contrib.appengine,
+        # which that legacy fallback still imports.
+        packages=[p for p in packages if not p.lower().startswith("urllib3")]
+        packages.append("urllib3<2")
         packages.sort()
     unknown=sorted(m for m in third_party if m not in module_to_package)
     return packages,unknown,scanned
