@@ -1013,6 +1013,7 @@ def _detect_python_packages(project_root):
     """Scan every Python source and infer only known third-party package mappings."""
     module_to_package = {
         "requests":"requests","telegram":"python-telegram-bot","telebot":"pyTelegramBotAPI",
+        "aiosqlite":"aiosqlite",
         "aiogram":"aiogram","discord":"discord.py","aiohttp":"aiohttp","bs4":"beautifulsoup4",
         "PIL":"Pillow","dotenv":"python-dotenv","pymongo":"pymongo","motor":"motor",
         "yt_dlp":"yt-dlp","cv2":"opencv-python-headless","numpy":"numpy","pandas":"pandas",
