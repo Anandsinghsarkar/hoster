@@ -102,7 +102,7 @@ def _storage_request(method, object_path, data=None, content_type="application/o
         # A 404 while restoring a not-yet-uploaded object is normal; callers
         # decide whether a missing object is fatal.
         try:
-            sys.stderr.write(f"[supabase-storage] {method} {object_path} failed: {type(exc).__name__}: {exc}\\n")
+            sys.stderr.write(f"[supabase-storage] {method} {object_path} failed: {type(exc).__name__}: {exc}\n")
         except Exception:
             pass
         return None
@@ -118,7 +118,7 @@ def _storage_upload_file(local_path, object_path):
             data = handle.read()
         return _storage_upload_bytes(object_path, data)
     except OSError as exc:
-        sys.stderr.write(f"[supabase-storage] read failed: {exc}\\n")
+        sys.stderr.write(f"[supabase-storage] read failed: {exc}\n")
         return False
 
 def _storage_download_file(object_path, local_path):
@@ -135,7 +135,7 @@ def _storage_download_file(object_path, local_path):
         temporary.replace(destination)
         return True
     except OSError as exc:
-        sys.stderr.write(f"[supabase-storage] save failed: {exc}\\n")
+        sys.stderr.write(f"[supabase-storage] save failed: {exc}\n")
         temporary.unlink(missing_ok=True)
         return False
 
@@ -190,7 +190,7 @@ def _storage_delete_prefix(prefix):
             with urllib.request.urlopen(req, timeout=45) as response: response.read()
         return True, len(objects)
     except Exception as exc:
-        sys.stderr.write(f"[supabase-storage] prefix cleanup {prefix!r} failed: {type(exc).__name__}: {exc}\\n")
+        sys.stderr.write(f"[supabase-storage] prefix cleanup {prefix!r} failed: {type(exc).__name__}: {exc}\n")
         return False, 0
 
 def _delete_bot_storage(bot_id, filename=""):
@@ -235,7 +235,7 @@ def _prune_orphaned_bot_storage():
                         except (ValueError, OSError): pass
         return {"ok": True, "removed": removed}
     except Exception as exc:
-        sys.stderr.write(f"[storage] orphan cleanup failed: {type(exc).__name__}: {exc}\\n")
+        sys.stderr.write(f"[storage] orphan cleanup failed: {type(exc).__name__}: {exc}\n")
         return {"ok": False, "removed": 0}
 
 def _directory_size(path):
@@ -337,7 +337,7 @@ def db():
                 # operations continue, so check Render logs for storage errors.
                 with _db_sync_lock:
                     if not _storage_upload_file(DB, "_system/hosting.db"):
-                        sys.stderr.write("[supabase-storage] database snapshot sync failed; latest changes may not survive a restart.\\n")
+                        sys.stderr.write("[supabase-storage] database snapshot sync failed; latest changes may not survive a restart.\n")
 
 def init_db():
     with db() as c:
@@ -593,7 +593,7 @@ def api_bot_delete(bot_id):
     try: (UPLOADS / bot["filename"]).unlink(missing_ok=True)
     except OSError: pass
     storage_ok, removed_objects = _delete_bot_storage(bot_id, bot["filename"])
-    if not storage_ok: sys.stderr.write(f"[storage] Bot {bot_id} remote cleanup failed; check Supabase logs.\\n")
+    if not storage_ok: sys.stderr.write(f"[storage] Bot {bot_id} remote cleanup failed; check Supabase logs.\n")
     return Response(json.dumps({"ok": True, "deleted_bot_id": bot_id}), mimetype="application/json")
 
 @app.get("/api/v1/payments")
@@ -1192,7 +1192,7 @@ def _trim_bot_log(bot_id, max_bytes=256 * 1024):
             with path.open("rb") as handle:
                 handle.seek(-max_bytes, os.SEEK_END)
                 recent = handle.read()
-            path.write_bytes(b"[system] Older log output trimmed to save Render disk.\\n" + recent)
+            path.write_bytes(b"[system] Older log output trimmed to save Render disk.\n" + recent)
     except OSError:
         pass
 
@@ -1220,7 +1220,7 @@ def _cleanup_bot_local_files(bot_id, snapshot_ok=False):
             with log_path.open("rb") as handle:
                 handle.seek(-256 * 1024, os.SEEK_END)
                 recent = handle.read()
-            log_path.write_bytes(b"[system] Older log output trimmed to save Render disk.\\n" + recent)
+            log_path.write_bytes(b"[system] Older log output trimmed to save Render disk.\n" + recent)
         return True
     except Exception as exc:
         _write_log(bot_id, f"[cleanup] Local cleanup failed: {type(exc).__name__}: {exc}")
@@ -1315,11 +1315,11 @@ def run_bot(bot):
                 vendor.mkdir(parents=True, exist_ok=True)
                 req_files = sorted(project_root.rglob("requirements.txt"))
                 inferred, unknown_imports, scanned_count = _detect_python_packages(project_root)
-                log.write(f"[detect] Scanned {scanned_count} Python source file(s).\\n")
-                log.write("[detect] Known dependencies: " + (", ".join(inferred) if inferred else "none") + "\\n")
+                log.write(f"[detect] Scanned {scanned_count} Python source file(s).\n")
+                log.write("[detect] Known dependencies: " + (", ".join(inferred) if inferred else "none") + "\n")
                 if unknown_imports:
                     log.write("[detect] Unmapped imports (add their package names to requirements.txt if needed): " +
-                              ", ".join(unknown_imports[:60]) + "\\n")
+                              ", ".join(unknown_imports[:60]) + "\n")
                 if req_files:
                     for index, req in enumerate(req_files):
                         command = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
@@ -1328,7 +1328,7 @@ def run_bot(bot):
                             command.extend(inferred)
                         _run_setup_command(command, req.parent, env, log,
                                            f"Install requirements ({req.relative_to(project_root)})")
-                    log.write(f"[setup] Processed {len(req_files)} requirements.txt file(s).\\n")
+                    log.write(f"[setup] Processed {len(req_files)} requirements.txt file(s).\n")
                 elif inferred:
                     _run_setup_command(
                         [sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
@@ -1336,7 +1336,7 @@ def run_bot(bot):
                         project_root, env, log, "Install dependencies detected from Python imports"
                     )
                 else:
-                    log.write("[setup] No mapped third-party imports found; pip install skipped.\\n")
+                    log.write("[setup] No mapped third-party imports found; pip install skipped.\n")
                 cmd = [sys.executable, "-u", str(entry)]
 
             # JavaScript: install package.json dependencies when present. The Docker
@@ -2004,7 +2004,7 @@ def _restore_approved_bots():
             except Exception as exc:
                 _write_log(row["id"], f"[restore] Failed: {type(exc).__name__}: {exc}")
     except Exception as exc:
-        sys.stderr.write(f"[restore] could not restore bots: {type(exc).__name__}: {exc}\\n")
+        sys.stderr.write(f"[restore] could not restore bots: {type(exc).__name__}: {exc}\n")
 
 # Start the optional ping loop and persisted bot recovery.
 _start_keep_alive()
